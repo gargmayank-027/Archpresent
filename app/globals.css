@@ -1,0 +1,315 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design tokens ──────────────────────────────────────────────────────── */
+:root {
+  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-mono: "DM Mono", "Fira Code", monospace;
+  --font-sans: "Instrument Sans", system-ui, sans-serif;
+
+  --c-bg: #f7f5f2;
+  --c-ink: #1a1917;
+  --c-muted: #7a7570;
+  --c-border: #e2ddd8;
+  --c-accent: #2d2b27;
+  --c-amber: #c47b2a;
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────── */
+body {
+  font-family: var(--font-sans);
+  background-color: var(--c-bg);
+  color: var(--c-ink);
+}
+
+/* ── Typography helpers ─────────────────────────────────────────────────── */
+.font-display {
+  font-family: var(--font-display);
+}
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* ── Step indicator ─────────────────────────────────────────────────────── */
+.step-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.step-indicator .step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+}
+.step-indicator .step.active {
+  color: var(--c-ink);
+}
+.step-indicator .step.complete {
+  color: var(--c-amber);
+}
+.step-indicator .step-num {
+  width: 20px;
+  height: 20px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  flex-shrink: 0;
+}
+.step-indicator .step-divider {
+  width: 32px;
+  height: 1px;
+  background: var(--c-border);
+  margin: 0 4px;
+}
+
+/* ── Card ───────────────────────────────────────────────────────────────── */
+.card {
+  background: white;
+  border: 1px solid var(--c-border);
+  border-radius: 2px;
+}
+
+/* ── Input / Textarea ───────────────────────────────────────────────────── */
+.field-input {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--c-border);
+  border-radius: 2px;
+  padding: 10px 14px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--c-ink);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.field-input:focus {
+  border-color: var(--c-ink);
+}
+.field-input::placeholder {
+  color: var(--c-muted);
+}
+.field-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+  margin-bottom: 6px;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 24px;
+  background: var(--c-ink);
+  color: white;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  border: 1px solid var(--c-ink);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-primary:hover {
+  background: var(--c-accent);
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  background: transparent;
+  color: var(--c-ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  border: 1px solid var(--c-border);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.btn-secondary:hover {
+  border-color: var(--c-ink);
+  background: var(--c-bg);
+}
+.btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--c-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: none;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.btn-ghost:hover {
+  color: var(--c-ink);
+}
+
+/* ── Upload zone ────────────────────────────────────────────────────────── */
+.upload-zone {
+  border: 1.5px dashed var(--c-border);
+  border-radius: 2px;
+  transition: border-color 0.2s, background 0.2s;
+  cursor: pointer;
+}
+.upload-zone:hover,
+.upload-zone.dragover {
+  border-color: var(--c-ink);
+  background: white;
+}
+
+/* ── Loading spinner ────────────────────────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── Pulse skeleton ─────────────────────────────────────────────────────── */
+@keyframes pulse-skeleton {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.skeleton {
+  background: var(--c-border);
+  border-radius: 2px;
+  animation: pulse-skeleton 1.4s ease-in-out infinite;
+}
+
+/* ── Fade in ────────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up {
+  animation: fadeUp 0.4s ease forwards;
+}
+.fade-up-1 { animation-delay: 0.05s; opacity: 0; }
+.fade-up-2 { animation-delay: 0.12s; opacity: 0; }
+.fade-up-3 { animation-delay: 0.2s;  opacity: 0; }
+.fade-up-4 { animation-delay: 0.28s; opacity: 0; }
+
+/* ── Moodboard tile ─────────────────────────────────────────────────────── */
+.moodboard-tile {
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  border: 1px solid var(--c-border);
+}
+.moodboard-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.5s ease;
+}
+.moodboard-tile:hover img {
+  transform: scale(1.03);
+}
+.moodboard-tile .overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.moodboard-tile:hover .overlay {
+  opacity: 1;
+}
+
+/* ── Radio pill ─────────────────────────────────────────────────────────── */
+.radio-pill input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.radio-pill label {
+  display: block;
+  padding: 10px 16px;
+  border: 1px solid var(--c-border);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--c-muted);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  text-align: center;
+}
+.radio-pill input[type="radio"]:checked + label {
+  border-color: var(--c-ink);
+  color: var(--c-ink);
+  background: white;
+}
+.radio-pill:hover label {
+  border-color: var(--c-muted);
+  color: var(--c-ink);
+}
+
+/* ── Strength bullet ────────────────────────────────────────────────────── */
+.strength-item {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 16px;
+  align-items: start;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--c-border);
+}
+.strength-item:last-child {
+  border-bottom: none;
+}
+.strength-num {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--c-border);
+  padding-top: 3px;
+}
+
+/* ── Progress bar ───────────────────────────────────────────────────────── */
+.progress-bar {
+  height: 2px;
+  background: var(--c-border);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--c-ink);
+  transition: width 0.4s ease;
+}
