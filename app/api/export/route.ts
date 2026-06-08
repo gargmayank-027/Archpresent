@@ -32,14 +32,13 @@ export async function POST(req: NextRequest) {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
 
-    return new NextResponse(pdfBuffer, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${slug}-concept.pdf"`,
-        "Content-Length": String(pdfBuffer.byteLength),
-      },
-    });
+      return new NextResponse(new Uint8Array(pdfBuffer), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${fileName}.pdf"`,
+        },
+      });
   } catch (err) {
     console.error("[POST /api/export]", err);
     return NextResponse.json({ error: "PDF generation failed" }, { status: 500 });
