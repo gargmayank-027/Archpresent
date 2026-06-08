@@ -27,6 +27,8 @@ export async function POST(req: NextRequest) {
 
     const pdfBuffer = await buildProjectPdf(project);
 
+    const fileName = "archpresent";
+
     const slug = project.name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
