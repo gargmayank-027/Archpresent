@@ -1,0 +1,24 @@
+{
+  "functions": {
+    "app/api/analyze/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/moodboards/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/export/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/projects/route.ts": {
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/uploads/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ]
+}

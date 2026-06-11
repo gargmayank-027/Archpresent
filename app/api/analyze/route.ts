@@ -48,15 +48,18 @@ export async function POST(req: NextRequest) {
 
     // ── Mode 1: enhance + analyse ─────────────────────────────────────────
 
-    // Step A — check image file exists on disk
-    const fs = await import("fs");
-    if (!fs.existsSync(project.planImagePath)) {
-      console.error(`[analyze] Image file missing: ${project.planImagePath}`);
-      return NextResponse.json({
-        error: `Plan image file not found on disk. Path: ${project.planImagePath}. Try re-uploading the plan.`,
-      }, { status: 500 });
+    // Step A — check image is accessible (disk path or blob URL)
+    const isRemote = project.planImagePath.startsWith("http");
+    if (!isRemote) {
+      const { existsSync } = await import("fs");
+      if (!existsSync(project.planImagePath)) {
+        console.error(`[analyze] Image file missing: ${project.planImagePath}`);
+        return NextResponse.json({
+          error: `Plan image file not found. Try re-uploading the plan.`,
+        }, { status: 500 });
+      }
     }
-    console.log(`[analyze] Image found: ${project.planImagePath}`);
+    console.log(`[analyze] Image found: ${isRemote ? "remote" : "local"} — ${project.planImagePath}`);
 
     // Step B — enhance image (Sharp). Never hard-fails — returns original on error.
     let enhanced;
@@ -84,8 +87,9 @@ export async function POST(req: NextRequest) {
     });
 
     // Step C — AI analysis
-    // Pass the local URL so loadImageAsBase64 reads from disk (faster, no HTTP)
-    const imageUrlForAI = enhanced.enhancedUrl; // e.g. /uploads/plan-xxx-enhanced.png
+    // On Vercel, enhancedUrl is a blob URL (https://...) — pass directly.
+    // Locally, it's /uploads/... — loadImageAsBase64 reads it from disk.
+    const imageUrlForAI = enhanced.enhancedUrl;
 
     // Block PDFs — Sharp on most systems cannot rasterise them.
     // AutoCAD exports clean PNGs in 2 clicks: Plot → PNG printer.

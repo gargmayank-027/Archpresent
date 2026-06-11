@@ -1,20 +1,28 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Allow serving images from picsum.photos placeholder (moodboard stubs)
   images: {
     remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "picsum.photos",
-      },
+      { protocol: "https", hostname: "picsum.photos" },
+      { protocol: "https", hostname: "images.unsplash.com" },
+      // Vercel Blob URLs
+      { protocol: "https", hostname: "*.public.blob.vercel-storage.com" },
+      { protocol: "https", hostname: "*.vercel-storage.com" },
     ],
   },
 
-  // Increase the body size limit for file uploads (default is 4MB)
   experimental: {
     serverActions: {
       bodySizeLimit: "25mb",
     },
+  },
+
+  // Sharp uses native binaries — tell webpack not to bundle it
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      const externals = Array.isArray(config.externals) ? config.externals : [];
+      config.externals = [...externals, "sharp"];
+    }
+    return config;
   },
 };
 

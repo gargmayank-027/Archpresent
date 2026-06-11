@@ -32,7 +32,9 @@ export interface Project {
   analysis?: PlanAnalysis;
   planStrengths?: string[];
   styleProfile?: StyleProfile;
-  moodboards?: Moodboard[];
+  moodboards?: Moodboard[];           // legacy single-image (kept for compat)
+  overallMoodboard?: OverallMoodboard; // whole-home style collage
+  roomMoodboards?: RoomMoodboard[];    // per-room: plan snippet + 3-4 images
   status: "created" | "analyzed" | "styled" | "complete";
 }
 
@@ -69,10 +71,27 @@ export interface StyleProfile {
   hardNo: string;
 }
 
+export interface MoodImage {
+  url: string;           // image URL
+  caption?: string;      // e.g. "Seating area", "Dining zone"
+}
+
+export interface RoomMoodboard {
+  roomName: string;
+  planSnippetUrl?: string;    // cropped portion of the floor plan for this room
+  images: MoodImage[];        // 3-4 mood images for this space
+}
+
+export interface OverallMoodboard {
+  images: MoodImage[];        // 4-image hero collage for whole-home style
+  styleStatement: string;     // one sentence describing the overall look
+}
+
+// Legacy — kept for backward compat with PDF, replaced by RoomMoodboard[]
 export interface Moodboard {
   roomName: string;
-  imageUrl: string; // URL served from /uploads/ or external placeholder
-  prompt?: string; // the prompt used to generate it (for regeneration)
+  imageUrl: string;
+  prompt?: string;
 }
 
 // ─── API Request / Response Shapes ───────────────────────────────────────────

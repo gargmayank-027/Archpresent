@@ -3,22 +3,35 @@
  *
  * POST /api/moodboards
  *   body: { projectId, styleProfile, rooms? }
- *   Saves the styleProfile and generates moodboard images for key rooms.
- *   If rooms[] is provided, only regenerate those rooms.
+ *   Saves styleProfile, generates:
+ *     1. overallMoodboard  — 4-image whole-home style hero
+ *     2. roomMoodboards[]  — per room: plan snippet + 3-4 images
  *
  * PATCH /api/moodboards
- *   body: { projectId, roomName, imageUrl }
- *   Replace a single moodboard image URL.
+ *   body: { projectId, roomName, imageIndex, imageUrl }
+ *   Replace a single image within a room's moodboard.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { projectStore } from "@/lib/store";
-import { generateMoodboardImage } from "@/lib/ai";
-import type { StyleProfile, Moodboard, RoomDetail } from "@/types";
+import {
+  generateRoomMoodboard,
+  generateOverallMoodboard,
+} from "@/lib/ai";
+import { cropRoomFromPlan } from "@/lib/planCrop";
+import type { StyleProfile, RoomMoodboard, OverallMoodboard, RoomDetail } from "@/types";
 
 export const runtime = "nodejs";
 
-const KEY_ROOMS = ["Living Room", "Kitchen", "Master Bedroom"];
+// Rooms we always try to generate moodboards for (if detected in analysis)
+const KEY_ROOMS = [
+  "Living Room",
+  "Kitchen",
+  "Master Bedroom",
+  "Bedroom 2",
+  "Bedroom 3",
+  "Balcony",
+];
 
 export async function POST(req: NextRequest) {
   try {
@@ -46,69 +59,104 @@ export async function POST(req: NextRequest) {
     }
     if (!project.analysis) {
       return NextResponse.json(
-        { error: "Project must be analyzed before generating moodboards" },
+        { error: "Analyse the plan first before generating moodboards" },
         { status: 400 }
       );
     }
 
-    // Determine which rooms to generate
-    const detectedRoomNames = project.analysis.rooms.map((r) => r.name);
-    const targetRoomNames =
-      requestedRooms && requestedRooms.length > 0
-        ? requestedRooms
-        : KEY_ROOMS.filter((kr) =>
-            detectedRoomNames.some((dn) =>
-              dn.toLowerCase().includes(kr.toLowerCase())
-            )
-          );
+    const detectedRooms = project.analysis.rooms as RoomDetail[];
 
-    // If we couldn't match any key rooms, fall back to first 3 detected
-    const finalRooms =
-      targetRoomNames.length > 0
-        ? targetRoomNames
-        : detectedRoomNames.slice(0, 3);
+    // ── Determine target rooms ─────────────────────────────────────────────
+    let targetNames: string[];
+    if (requestedRooms && requestedRooms.length > 0) {
+      targetNames = requestedRooms;
+    } else {
+      // Key rooms that appear in the analysis
+      targetNames = KEY_ROOMS.filter((kr) =>
+        detectedRooms.some((r) => r.name.toLowerCase().includes(kr.toLowerCase()))
+      );
+      // If no key rooms matched, use first 4 detected
+      if (targetNames.length === 0) {
+        targetNames = detectedRooms.slice(0, 4).map((r) => r.name);
+      }
+    }
 
-    // Generate in parallel
-    const existing = project.moodboards ?? [];
-    const generated: Moodboard[] = [];
-
-    await Promise.all(
-      finalRooms.map(async (roomName) => {
-        const roomDetail: RoomDetail =
-          project.analysis!.rooms.find((r) => r.name === roomName) ?? {
-            name: roomName,
-          };
-
-        const imageUrl = await generateMoodboardImage(roomDetail, styleProfile);
-        generated.push({ roomName, imageUrl });
-      })
+    // ── 1. Overall moodboard ──────────────────────────────────────────────
+    console.log("[moodboards] Generating overall moodboard…");
+    const overallMoodboard: OverallMoodboard = await generateOverallMoodboard(
+      detectedRooms,
+      styleProfile
     );
 
-    // Merge with any existing moodboards not being regenerated
+    // ── 2. Per-room moodboards ────────────────────────────────────────────
+    console.log(`[moodboards] Generating ${targetNames.length} room moodboards…`);
+
+    const existing = project.roomMoodboards ?? [];
+    const generated: RoomMoodboard[] = [];
+
+    for (const roomName of targetNames) {
+      const roomDetail =
+        detectedRooms.find((r) => r.name === roomName) ?? { name: roomName };
+
+      // Generate 3-4 mood images
+      const images = await generateRoomMoodboard(roomDetail as RoomDetail, styleProfile);
+
+      // Crop plan snippet for this room
+      const planSnippetUrl = await cropRoomFromPlan(
+        project.planImagePath,
+        roomName,
+        projectId
+      );
+
+      generated.push({
+        roomName,
+        planSnippetUrl: planSnippetUrl ?? undefined,
+        images,
+      });
+
+      console.log(
+        `[moodboards] ${roomName}: ${images.length} images, snippet: ${planSnippetUrl ? "✓" : "—"}`
+      );
+    }
+
+    // Merge: keep existing rooms not being regenerated
     const merged = [
-      ...existing.filter((e) => !finalRooms.includes(e.roomName)),
+      ...existing.filter((e) => !targetNames.includes(e.roomName)),
       ...generated,
     ];
 
+    // Also keep legacy moodboards[] for backward compat (PDF uses it)
+    const legacyMoodboards = merged.map((rm) => ({
+      roomName: rm.roomName,
+      imageUrl: rm.images[0]?.url ?? "",
+    }));
+
     await projectStore.update(projectId, {
       styleProfile,
-      moodboards: merged,
+      overallMoodboard,
+      roomMoodboards: merged,
+      moodboards:     legacyMoodboards, // keeps export/PDF working
       status: "styled",
     });
 
-    return NextResponse.json({ moodboards: merged, styleProfile });
+    return NextResponse.json({
+      overallMoodboard,
+      roomMoodboards: merged,
+      styleProfile,
+    });
   } catch (err) {
     console.error("[POST /api/moodboards]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
 
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { projectId, roomName, imageUrl } = body as {
+    const { projectId, roomName, imageIndex, imageUrl } = body as {
       projectId: string;
       roomName: string;
+      imageIndex: number;
       imageUrl: string;
     };
 
@@ -117,14 +165,18 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    const moodboards = (project.moodboards ?? []).map((mb) =>
-      mb.roomName === roomName ? { ...mb, imageUrl } : mb
-    );
+    const roomMoodboards = (project.roomMoodboards ?? []).map((rm) => {
+      if (rm.roomName !== roomName) return rm;
+      const images = rm.images.map((img, i) =>
+        i === imageIndex ? { ...img, url: imageUrl } : img
+      );
+      return { ...rm, images };
+    });
 
-    await projectStore.update(projectId, { moodboards });
-    return NextResponse.json({ moodboards });
+    await projectStore.update(projectId, { roomMoodboards });
+    return NextResponse.json({ roomMoodboards });
   } catch (err) {
     console.error("[PATCH /api/moodboards]", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

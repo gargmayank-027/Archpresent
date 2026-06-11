@@ -65,35 +65,44 @@ export default function ExportPage() {
   if (loading)  return <PageSkeleton />;
   if (!project) return <div className="p-12 text-center text-stone-400">Project not found.</div>;
 
-  const { analysis, planStrengths = [], moodboards = [], styleProfile } = project;
+  const { analysis, planStrengths = [], moodboards = [], styleProfile,
+          overallMoodboard, roomMoodboards = [] } = project;
   const isReady = planStrengths.length > 0;
 
-  // Build slide deck definition for preview
+  // Build slide deck — mirrors PDF page order
   const slides: SlidePreview[] = [
-    {
-      type: "cover",
-      label: "Cover",
-      icon: "⬛",
-    },
+    { type: "cover",     label: "Cover",        icon: "⬛" },
     ...(project.plotInfo && Object.keys(project.plotInfo).length > 0
       ? [{ type: "site" as const, label: "Site Context", icon: "🧭" }]
       : []),
-    {
-      type: "plan",
-      label: "Floor Plan",
-      icon: "📐",
-      imageUrl: project.planImageUrl,
-    },
+    { type: "plan",      label: "Floor Plan",   icon: "📐", imageUrl: project.planImageUrl },
     ...(planStrengths.length > 0
       ? [{ type: "strengths" as const, label: "Plan Strengths", icon: "✦" }]
       : []),
-    ...moodboards.map((mb) => ({
-      type: "moodboard" as const,
-      label: mb.roomName,
-      icon: "🖼",
-      imageUrl: mb.imageUrl,
-      roomName: mb.roomName,
-    })),
+    // Overall style moodboard slide
+    ...(overallMoodboard
+      ? [{ type: "overall-mood" as const, label: "Overall Style", icon: "🎨",
+           imageUrl: overallMoodboard.images[0]?.url }]
+      : []),
+    // Per-room slides (use roomMoodboards if available, else legacy moodboards)
+    ...(roomMoodboards.length > 0
+      ? roomMoodboards.map((rm) => ({
+          type: "room-mood" as const,
+          label: rm.roomName,
+          icon: "🖼",
+          imageUrl: rm.images[0]?.url,
+          roomName: rm.roomName,
+          planSnippetUrl: rm.planSnippetUrl,
+          images: rm.images,
+        }))
+      : moodboards.map((mb) => ({
+          type: "moodboard" as const,
+          label: mb.roomName,
+          icon: "🖼",
+          imageUrl: mb.imageUrl,
+          roomName: mb.roomName,
+        }))
+    ),
   ];
 
   return (
@@ -215,7 +224,7 @@ export default function ExportPage() {
           { label: "Total Slides",   value: String(slides.length) },
           { label: "Format",         value: "16 : 9" },
           { label: "Plan Strengths", value: String(planStrengths.length) },
-          { label: "Moodboards",     value: String(moodboards.length) },
+          { label: "Rooms Styled",   value: String(roomMoodboards.length > 0 ? roomMoodboards.length : moodboards.length) },
         ].map((s) => (
           <div key={s.label} className="card p-4 text-center">
             <p className="font-display text-3xl font-light text-stone-800 mb-1"
@@ -252,11 +261,13 @@ export default function ExportPage() {
 // ─── Slide types ──────────────────────────────────────────────────────────────
 
 type SlidePreview = {
-  type: "cover" | "site" | "plan" | "strengths" | "moodboard";
+  type: "cover" | "site" | "plan" | "strengths" | "moodboard" | "overall-mood" | "room-mood";
   label: string;
   icon: string;
   imageUrl?: string;
   roomName?: string;
+  planSnippetUrl?: string;
+  images?: Array<{ url: string; caption?: string }>;
 };
 
 // ─── Slide thumbnail (mini, in filmstrip) ─────────────────────────────────────
@@ -337,6 +348,47 @@ function SlideThumbnail({ slide, project }: { slide: SlidePreview; project: Proj
         <div className="absolute inset-0 bg-black/50" />
         <div className="absolute bottom-1 left-1.5">
           <p className="font-mono text-[5px] text-white uppercase tracking-widest">{slide.roomName}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Overall style moodboard thumbnail — 2×2 grid
+  if (slide.type === "overall-mood" && slide.imageUrl) {
+    const imgs = [slide.imageUrl, ...(slide.images?.slice(1, 4).map(i => i.url) ?? [])];
+    return (
+      <div className="w-full h-full bg-stone-900 grid grid-cols-2 gap-0.5 p-0.5">
+        {imgs.slice(0, 4).map((url, i) => (
+          <div key={i} className="relative overflow-hidden">
+            <img src={url} alt="" className="w-full h-full object-cover" />
+          </div>
+        ))}
+        <div className="absolute bottom-1 left-1.5">
+          <p className="font-mono text-[5px] text-white uppercase tracking-widest">Overall Style</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Per-room moodboard thumbnail — plan snippet + image grid
+  if (slide.type === "room-mood") {
+    return (
+      <div className="w-full h-full bg-[#f7f5f2] flex gap-0.5 p-0.5">
+        {/* Plan snippet */}
+        <div className="w-[28%] bg-white flex items-center justify-center overflow-hidden">
+          {slide.planSnippetUrl ? (
+            <img src={slide.planSnippetUrl} alt="plan" className="w-full h-full object-contain" style={{imageRendering:"crisp-edges"}} />
+          ) : (
+            <span className="font-mono text-[4px] text-stone-300 uppercase">Plan</span>
+          )}
+        </div>
+        {/* Mood images */}
+        <div className="flex-1 grid grid-cols-3 gap-0.5">
+          {(slide.images ?? []).slice(0, 3).map((img, i) => (
+            <div key={i} className="relative overflow-hidden">
+              <img src={img.url} alt="" className="w-full h-full object-cover" />
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -521,6 +573,115 @@ function SlidePreviewLarge({ slide, project }: { slide: SlidePreview; project: P
     );
   }
 
+  // Overall style moodboard — 2×2 collage
+  if (slide.type === "overall-mood") {
+    const imgs = slide.images ?? [];
+    return (
+      <div className="w-full h-full bg-stone-900 flex flex-col">
+        {/* Title bar */}
+        <div className="flex items-center justify-between px-6 py-3 flex-shrink-0">
+          <div>
+            <p className="font-mono text-[9px] text-stone-400 uppercase tracking-widest">Interior Style · Overall Concept</p>
+            <p className="text-base font-bold text-white mt-0.5 uppercase tracking-wide">
+              {slide.label}
+            </p>
+          </div>
+          {project.styleProfile && (
+            <div className="flex gap-1.5">
+              {[project.styleProfile.overallStyle, project.styleProfile.budgetVibe].map((t) => (
+                <span key={t} className="font-mono text-[8px] uppercase tracking-wider text-stone-400 border border-stone-700 px-2 py-0.5">{t}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        {/* 2×2 image grid */}
+        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-1 p-1">
+          {imgs.slice(0, 4).map((img, i) => (
+            <div key={i} className="relative overflow-hidden group">
+              <img src={img.url} alt={img.caption}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+              <span className="absolute bottom-2 left-3 font-mono text-[9px] text-white uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                {img.caption}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Per-room moodboard — plan snippet + image grid
+  if (slide.type === "room-mood") {
+    const rm = project.roomMoodboards?.find((r) => r.roomName === slide.roomName);
+    const roomDetail = project.analysis?.rooms.find((r) => r.name === slide.roomName);
+    return (
+      <div className="w-full h-full bg-stone-50 flex">
+        {/* Left: plan snippet + room info */}
+        <div className="w-[26%] bg-white border-r border-stone-200 flex flex-col p-5 gap-3">
+          <div>
+            <p className="font-mono text-[9px] text-stone-400 uppercase tracking-widest mb-1">{slide.roomName}</p>
+            {roomDetail?.sizeEstimateSqm && (
+              <p className="text-2xl font-light text-stone-800">{roomDetail.sizeEstimateSqm}<span className="text-sm text-stone-400 ml-1">m²</span></p>
+            )}
+            {roomDetail?.orientation && (
+              <p className="font-mono text-[9px] text-stone-400 mt-1">{roomDetail.orientation}</p>
+            )}
+          </div>
+          {/* Plan snippet */}
+          <div className="flex-1 flex items-center justify-center bg-stone-50 rounded-sm overflow-hidden">
+            {slide.planSnippetUrl ? (
+              <img src={slide.planSnippetUrl} alt="plan snippet"
+                className="max-w-full max-h-full object-contain"
+                style={{ imageRendering: "crisp-edges" }} />
+            ) : (
+              <div className="text-center">
+                <p className="font-mono text-[9px] text-stone-300 uppercase">Plan snippet</p>
+                <p className="font-mono text-[8px] text-stone-200">unavailable</p>
+              </div>
+            )}
+          </div>
+          {/* Special features */}
+          {roomDetail?.specialFeatures && roomDetail.specialFeatures.length > 0 && (
+            <div className="space-y-1">
+              {roomDetail.specialFeatures.slice(0, 3).map((f) => (
+                <p key={f} className="font-mono text-[9px] text-stone-400">· {f}</p>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Right: mood images */}
+        <div className="flex-1 flex flex-col gap-1 p-1">
+          {/* Top 3 images */}
+          <div className="flex-1 grid grid-cols-3 gap-1">
+            {(rm?.images ?? slide.images ?? []).slice(0, 3).map((img, i) => (
+              <div key={i} className="relative overflow-hidden group">
+                <img src={img.url} alt={img.caption}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <span className="absolute bottom-2 left-2 font-mono text-[9px] text-white uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                  {img.caption}
+                </span>
+              </div>
+            ))}
+          </div>
+          {/* 4th image wide strip */}
+          {((rm?.images ?? slide.images ?? [])[3]) && (
+            <div className="h-20 relative overflow-hidden group flex-shrink-0">
+              <img src={(rm?.images ?? slide.images ?? [])[3].url} alt=""
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/50 to-transparent" />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[9px] text-white uppercase tracking-widest">
+                {(rm?.images ?? slide.images ?? [])[3].caption}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full bg-stone-100 flex items-center justify-center">
       <p className="text-stone-400 font-mono text-xs uppercase tracking-widest">{slide.label}</p>
@@ -538,19 +699,24 @@ function SlideDetailPanel({
   slideIndex: number;
 }) {
   const editLinks: Record<string, string> = {
-    cover:     `/project/${project.id}/review`,
-    site:      `/project/${project.id}/new`,
-    plan:      `/project/${project.id}/review`,
-    strengths: `/project/${project.id}/review`,
-    moodboard: `/project/${project.id}/moodboards`,
+    cover:        `/project/${project.id}/review`,
+    site:         `/project/${project.id}/new`,
+    plan:         `/project/${project.id}/review`,
+    strengths:    `/project/${project.id}/review`,
+    moodboard:    `/project/${project.id}/moodboards`,
+    "overall-mood": `/project/${project.id}/moodboards`,
+    "room-mood":  `/project/${project.id}/moodboards`,
   };
 
+  const rmDetail = project.roomMoodboards?.find((r) => r.roomName === slide.roomName);
   const descriptions: Record<string, string> = {
-    cover:     `Cover slide with project name, client, and firm details.`,
-    site:      `Site context — plot details, facing direction, and configuration.`,
-    plan:      `Floor plan with ${project.analysis?.rooms?.length ?? "?"} detected rooms listed on the right.`,
-    strengths: `${project.planStrengths?.length ?? 0} client-friendly bullets about this plan's key advantages.`,
-    moodboard: `Interior moodboard for ${slide.roomName} — full-bleed image with room label overlay.`,
+    cover:        `Cover slide — project name, client, and firm details.`,
+    site:         `Site context — plot details, facing direction, and configuration.`,
+    plan:         `Floor plan with ${project.analysis?.rooms?.length ?? "?"} detected rooms listed on the right.`,
+    strengths:    `${project.planStrengths?.length ?? 0} client-friendly bullets about this plan's key advantages.`,
+    moodboard:    `Interior moodboard for ${slide.roomName}.`,
+    "overall-mood": `Overall interior style collage — 4 images showing the full design language of the home.`,
+    "room-mood":  `${slide.roomName}: plan snippet + ${rmDetail?.images?.length ?? 3} mood images. ${project.analysis?.rooms?.find(r => r.name === slide.roomName)?.sizeEstimateSqm ? project.analysis?.rooms?.find(r => r.name === slide.roomName)?.sizeEstimateSqm + " sqm." : ""}`,
   };
 
   return (

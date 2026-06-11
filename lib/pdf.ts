@@ -23,7 +23,7 @@ import {
 import fs from "fs";
 import https from "https";
 import http from "http";
-import type { Project, Moodboard, FirmProfile, PdfAccentColor } from "@/types";
+import type { Project, Moodboard, FirmProfile, PdfAccentColor, RoomMoodboard, OverallMoodboard } from "@/types";
 import { firmStore } from "@/lib/store";
 
 // ─── 16:9 slide dimensions (pt) ──────────────────────────────────────────────
@@ -67,14 +67,19 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
   // Embed logo
   let logoBytes: Uint8Array | null = null;
   let logoIsPng = false;
-  if (firm?.logoDiskPath) {
+  // logoDiskPath is a disk path locally, a blob URL on Vercel
+  const logoPath = firm?.logoDiskPath ?? firm?.logoUrl;
+  if (logoPath) {
     try {
-      const ext = firm.logoDiskPath.split(".").pop()?.toLowerCase() ?? "";
+      const ext = logoPath.split(".").pop()?.toLowerCase() ?? "";
       if (["png","jpg","jpeg","webp"].includes(ext)) {
-        logoBytes = fs.readFileSync(firm.logoDiskPath);
-        logoIsPng = ext === "png";
+        const buf = await loadImageBytes(logoPath);
+        if (buf) {
+          logoBytes = buf;
+          logoIsPng = ext === "png";
+        }
       }
-    } catch { /* missing */ }
+    } catch { /* logo failed — skip gracefully */ }
   }
 
   // Build pages
@@ -90,8 +95,21 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
     await addStrengthsSlide(doc, project, project.planStrengths!, accent, reg, bold);
   }
 
-  for (const mb of project.moodboards ?? []) {
-    await addMoodboardSlide(doc, mb, accent, reg, bold);
+  // Overall style moodboard slide (4-image collage)
+  if (project.overallMoodboard) {
+    await addOverallMoodboardSlide(doc, project.overallMoodboard, project, accent, reg, bold, italic);
+  }
+
+  // Per-room slides: plan snippet left + 3-4 mood images right
+  if (project.roomMoodboards && project.roomMoodboards.length > 0) {
+    for (const rm of project.roomMoodboards) {
+      await addRoomMoodboardSlide(doc, rm, project, accent, reg, bold);
+    }
+  } else {
+    // Legacy fallback
+    for (const mb of project.moodboards ?? []) {
+      await addMoodboardSlide(doc, mb, accent, reg, bold);
+    }
   }
 
   // Footer on all pages
@@ -334,7 +352,8 @@ async function addPlanSlide(
   const planH = H - 80;
 
   try {
-    const imgBytes = fs.readFileSync(project.planImagePath);
+    const imgBytes = await loadImageBytes(project.planImagePath);
+    if (!imgBytes) throw new Error("Could not load plan image");
     const ext      = project.planImagePath.split(".").pop()?.toLowerCase();
     const pdfImg   = ext === "png" ? await doc.embedPng(imgBytes) : await doc.embedJpg(imgBytes);
     const dims     = pdfImg.scaleToFit(planW - M * 2, planH - 20);
@@ -453,9 +472,8 @@ async function addMoodboardSlide(
 
   // Full-bleed image
   try {
-    const imgBytes = mb.imageUrl.startsWith("http")
-      ? await fetchRemoteImage(mb.imageUrl)
-      : fs.readFileSync(`${process.cwd()}/public${mb.imageUrl}`);
+    const imgBytes = await loadImageBytes(mb.imageUrl);
+    if (!imgBytes) throw new Error("Could not load moodboard image");
     const pdfImg = await doc.embedJpg(imgBytes).catch(() => doc.embedPng(imgBytes));
 
     // Scale to fill slide (crop if needed — use the larger scale factor)
@@ -497,6 +515,259 @@ async function addMoodboardSlide(
     x: W - M - bold.widthOfTextAtSize("Interior Concept  ·  AI-Generated Reference", 8),
     y: 20, size: 8, font, color: rgb(1,1,1), opacity: 0.35,
   });
+}
+
+// ─── 6. Overall style moodboard slide ────────────────────────────────────────
+// 2×2 grid of hero images + style statement
+
+async function addOverallMoodboardSlide(
+  doc: PDFDocument,
+  overall: OverallMoodboard,
+  project: Project,
+  accent: RGB,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont,
+) {
+  const page = doc.addPage([W, H]);
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.bgDark });
+  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+
+  // Title bar
+  page.drawText("INTERIOR STYLE  ·  OVERALL CONCEPT", {
+    x: M, y: H - M - 4, size: 9, font: bold, color: accent,
+  });
+
+  // Style name + statement
+  const styleName = project.styleProfile?.overallStyle ?? "Modern";
+  page.drawText(styleName.toUpperCase(), {
+    x: M, y: H - M - 22, size: 20, font: bold, color: C.white,
+  });
+  page.drawText(`"${overall.styleStatement}"`, {
+    x: M, y: H - M - 40, size: 10, font: italic, color: C.light, opacity: 0.7,
+  });
+
+  // 2×2 image grid — right 60% of slide, top to bottom
+  const gridLeft  = W * 0.42;
+  const gridRight = W - 16;
+  const gridTop   = H - 16;
+  const gridBot   = 50;
+  const gW  = (gridRight - gridLeft - 8) / 2;
+  const gH  = (gridTop - gridBot - 8) / 2;
+
+  const positions = [
+    { x: gridLeft,        y: gridTop - gH },
+    { x: gridLeft + gW + 8, y: gridTop - gH },
+    { x: gridLeft,        y: gridBot },
+    { x: gridLeft + gW + 8, y: gridBot },
+  ];
+
+  for (let i = 0; i < Math.min(4, overall.images.length); i++) {
+    const img   = overall.images[i];
+    const pos   = positions[i];
+    try {
+      const buf  = await fetchRemoteImageSafe(img.url);
+      if (!buf) continue;
+      const pImg = await embedImageSafe(doc, buf);
+      if (!pImg) continue;
+      page.drawImage(pImg, { x: pos.x, y: pos.y, width: gW, height: gH });
+      // Caption overlay
+      page.drawRectangle({ x: pos.x, y: pos.y, width: gW, height: 22, color: rgb(0,0,0), opacity: 0.55 });
+      page.drawText((img.caption ?? "").toUpperCase(), {
+        x: pos.x + 8, y: pos.y + 7, size: 7, font, color: C.white, opacity: 0.8,
+      });
+    } catch { /* skip */ }
+  }
+
+  // Palette tags bottom-left
+  const tags = [
+    project.styleProfile?.overallStyle,
+    project.styleProfile?.palette?.replace(/([A-Z])/g, " $1").trim(),
+    project.styleProfile?.budgetVibe,
+  ].filter(Boolean) as string[];
+
+  let tx = M;
+  for (const tag of tags) {
+    page.drawRectangle({ x: tx, y: 60, width: font.widthOfTextAtSize(tag, 8) + 16, height: 18,
+      borderColor: accent, borderWidth: 0.5 });
+    page.drawText(tag.toUpperCase(), { x: tx + 8, y: 66, size: 8, font, color: C.light });
+    tx += font.widthOfTextAtSize(tag, 8) + 28;
+  }
+}
+
+// ─── 7. Per-room moodboard slide ──────────────────────────────────────────────
+// Left: plan snippet + room info. Right: 3-image grid + 4th wide strip.
+
+async function addRoomMoodboardSlide(
+  doc: PDFDocument,
+  rm: RoomMoodboard,
+  project: Project,
+  accent: RGB,
+  font: PDFFont,
+  bold: PDFFont,
+) {
+  const page = doc.addPage([W, H]);
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.bg });
+  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+
+  // Room title
+  page.drawRectangle({ x: M, y: H - M - 10, width: 4, height: 14, color: accent });
+  page.drawText(rm.roomName.toUpperCase(), {
+    x: M + 12, y: H - M - 5, size: 12, font: bold, color: C.ink,
+  });
+  page.drawLine({
+    start: { x: M, y: H - M - 22 },
+    end:   { x: W - M, y: H - M - 22 },
+    thickness: 0.5, color: C.rule,
+  });
+
+  // ── Left panel: plan snippet ─────────────────────────────────────────────
+  const leftW = W * 0.28;
+  const planY = H - M - 120;
+  const planH = planY - 80;
+
+  // Room detail info
+  const roomDetail = project.analysis?.rooms.find((r) => r.name === rm.roomName);
+  if (roomDetail?.sizeEstimateSqm) {
+    page.drawText(`${roomDetail.sizeEstimateSqm} sqm`, {
+      x: M, y: H - M - 42, size: 11, font: bold, color: C.ink,
+    });
+  }
+  if (roomDetail?.orientation) {
+    page.drawText(roomDetail.orientation, {
+      x: M, y: H - M - 58, size: 9, font, color: C.muted,
+    });
+  }
+  if (roomDetail?.notes) {
+    page.drawText(roomDetail.notes, {
+      x: M, y: H - M - 72, size: 8, font, color: C.muted,
+    });
+  }
+
+  // Plan snippet image
+  if (rm.planSnippetUrl) {
+    try {
+      const buf = await loadImageBytes(rm.planSnippetUrl);
+      if (buf) {
+        const pImg = await doc.embedPng(buf).catch(() => doc.embedJpg(buf));
+        const dims = pImg.scaleToFit(leftW - M - 8, planH);
+        const sx   = M + (leftW - M - 8 - dims.width) / 2;
+        const sy   = 80 + (planH - dims.height) / 2;
+        page.drawRectangle({ x: sx - 4, y: sy - 4, width: dims.width + 8, height: dims.height + 8,
+          color: C.white, borderColor: C.rule, borderWidth: 0.5 });
+        page.drawImage(pImg, { x: sx, y: sy, width: dims.width, height: dims.height });
+      }
+    } catch { /* skip */ }
+  } else {
+    // No snippet — draw placeholder
+    page.drawRectangle({ x: M, y: 80, width: leftW - M - 8, height: planH,
+      color: C.altRow, borderColor: C.rule, borderWidth: 0.5 });
+    page.drawText("PLAN SNIPPET", { x: M + 12, y: 80 + planH / 2, size: 8, font, color: C.muted });
+  }
+
+  // Special features tags
+  if (roomDetail?.specialFeatures?.length) {
+    let fy = 64;
+    for (const feat of roomDetail.specialFeatures.slice(0, 3)) {
+      page.drawText(`· ${feat}`, { x: M, y: fy, size: 8, font, color: C.muted });
+      fy -= 12;
+    }
+  }
+
+  // ── Right panel: mood images ─────────────────────────────────────────────
+  const rx   = leftW + 16;
+  const rW   = W - rx - M;
+  const imgH = (H - 90) * 0.55;   // top 3 images
+  const imgW = (rW - 8) / 3;
+
+  // Top row: 3 images
+  for (let i = 0; i < Math.min(3, rm.images.length); i++) {
+    const img = rm.images[i];
+    const ix  = rx + i * (imgW + 4);
+    try {
+      const buf  = await fetchRemoteImageSafe(img.url);
+      if (!buf) continue;
+      const pImg = await embedImageSafe(doc, buf);
+      if (!pImg) continue;
+      const dims = pImg.scaleToFit(imgW, imgH);
+      page.drawImage(pImg, { x: ix, y: H - 30 - imgH + (imgH - dims.height) / 2, width: dims.width, height: dims.height });
+      // Caption
+      page.drawRectangle({ x: ix, y: H - 30 - imgH, width: dims.width, height: 18,
+        color: rgb(0,0,0), opacity: 0.5 });
+      page.drawText((img.caption ?? "").toUpperCase(), {
+        x: ix + 6, y: H - 30 - imgH + 5, size: 7, font, color: C.white, opacity: 0.85,
+      });
+    } catch { /* skip */ }
+  }
+
+  // 4th image: full-width strip below top row
+  if (rm.images[3]) {
+    const img   = rm.images[3];
+    const stripY = M + 24;
+    const stripH = (H - 90) * 0.32;
+    try {
+      const buf  = await fetchRemoteImageSafe(img.url);
+      if (buf) {
+        const pImg = await embedImageSafe(doc, buf);
+        if (pImg) {
+          const dims = pImg.scaleToFit(rW, stripH);
+          page.drawImage(pImg, { x: rx, y: stripY, width: dims.width, height: dims.height });
+          page.drawRectangle({ x: rx, y: stripY, width: dims.width, height: 20,
+            color: rgb(0,0,0), opacity: 0.55 });
+          page.drawText((img.caption ?? "").toUpperCase(), {
+            x: rx + 8, y: stripY + 7, size: 7, font, color: C.white, opacity: 0.85,
+          });
+        }
+      }
+    } catch { /* skip */ }
+  }
+}
+
+// ─── Safe image helpers ───────────────────────────────────────────────────────
+
+async function fetchRemoteImageSafe(url: string): Promise<Buffer | null> {
+  try {
+    if (url.startsWith("/")) {
+      const p = `${process.cwd()}/public${url}`;
+      if (fs.existsSync(p)) return fs.readFileSync(p);
+      return null;
+    }
+    return await fetchRemoteImage(url);
+  } catch {
+    return null;
+  }
+}
+
+async function embedImageSafe(doc: PDFDocument, buf: Buffer) {
+  try {
+    return await doc.embedJpg(buf);
+  } catch {
+    try { return await doc.embedPng(buf); } catch { return null; }
+  }
+}
+
+// ─── Universal image loader (disk or remote) ─────────────────────────────────
+
+async function loadImageBytes(pathOrUrl: string): Promise<Buffer | null> {
+  try {
+    if (pathOrUrl.startsWith("http")) {
+      return await fetchRemoteImage(pathOrUrl);
+    }
+    // Local disk
+    if (fs.existsSync(pathOrUrl)) {
+      return fs.readFileSync(pathOrUrl);
+    }
+    // Try as relative to public/
+    const publicPath = require("path").join(process.cwd(), "public", pathOrUrl);
+    if (fs.existsSync(publicPath)) {
+      return fs.readFileSync(publicPath);
+    }
+    console.warn("[pdf] Image not found:", pathOrUrl);
+    return null;
+  } catch (err) {
+    console.warn("[pdf] Failed to load image:", pathOrUrl, err);
+    return null;
+  }
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────

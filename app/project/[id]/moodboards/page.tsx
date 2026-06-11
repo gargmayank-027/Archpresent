@@ -3,7 +3,12 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
-import type { Project, StyleProfile, Moodboard, OverallStyle, Palette, BudgetVibe } from "@/types";
+import type {
+  Project, StyleProfile, OverallMoodboard, RoomMoodboard,
+  OverallStyle, Palette, BudgetVibe,
+} from "@/types";
+
+// ─── Style options ────────────────────────────────────────────────────────────
 
 const STYLE_OPTIONS: { value: OverallStyle; desc: string }[] = [
   { value: "Modern",       desc: "Clean lines, minimal ornamentation" },
@@ -15,29 +20,28 @@ const STYLE_OPTIONS: { value: OverallStyle; desc: string }[] = [
 ];
 
 const PALETTE_OPTIONS: { value: Palette; label: string; desc: string }[] = [
-  { value: "LightAiry",   label: "Light & Airy",    desc: "Whites, creams, soft pastels" },
-  { value: "NeutralWarm", label: "Neutral & Warm",   desc: "Beiges, terracottas, earthy tones" },
-  { value: "DarkMoody",   label: "Dark & Moody",     desc: "Charcoals, deep greens, rich hues" },
+  { value: "LightAiry",   label: "Light & Airy",  desc: "Whites, creams, soft pastels" },
+  { value: "NeutralWarm", label: "Neutral & Warm", desc: "Beiges, terracottas, earthy" },
+  { value: "DarkMoody",   label: "Dark & Moody",   desc: "Charcoals, deep greens, rich hues" },
 ];
 
-const BUDGET_OPTIONS: { value: BudgetVibe; label: string; desc: string }[] = [
-  { value: "Practical", label: "Practical", desc: "Smart, cost-effective choices" },
-  { value: "MidRange",  label: "Mid-Range", desc: "Quality materials, thoughtful details" },
-  { value: "Premium",   label: "Premium",   desc: "Luxury finishes, bespoke pieces" },
+const BUDGET_OPTIONS: { value: BudgetVibe; label: string }[] = [
+  { value: "Practical", label: "Practical" },
+  { value: "MidRange",  label: "Mid-Range" },
+  { value: "Premium",   label: "Premium" },
 ];
 
-// Per-room generation status
-interface RoomStatus {
-  roomName: string;
-  state: "idle" | "generating" | "done" | "error";
-  error?: string;
-}
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function MoodboardsPage() {
   const { id } = useParams<{ id: string }>();
 
-  const [project,  setProject]  = useState<Project | null>(null);
-  const [loading,  setLoading]  = useState(true);
+  const [project,          setProject]          = useState<Project | null>(null);
+  const [loading,          setLoading]          = useState(true);
+  const [generating,       setGenerating]       = useState(false);
+  const [globalError,      setGlobalError]      = useState<string | null>(null);
+  const [showWarmup,       setShowWarmup]        = useState(false);
+  const [currentStep,      setCurrentStep]      = useState("");
 
   // Style form
   const [overallStyle, setOverallStyle] = useState<OverallStyle>("Modern");
@@ -45,15 +49,10 @@ export default function MoodboardsPage() {
   const [budgetVibe,   setBudgetVibe]   = useState<BudgetVibe>("MidRange");
   const [hardNo,       setHardNo]       = useState("");
 
-  // Moodboard state
-  const [moodboards,      setMoodboards]      = useState<Moodboard[]>([]);
-  const [roomStatuses,    setRoomStatuses]    = useState<RoomStatus[]>([]);
-  const [globalError,     setGlobalError]     = useState<string | null>(null);
-  const [styleSet,        setStyleSet]        = useState(false);
-  const [generatingAll,   setGeneratingAll]   = useState(false);
-
-  // HF-specific: show warmup notice if generation takes >8s
-  const [showWarmupNotice, setShowWarmupNotice] = useState(false);
+  // Results
+  const [overallMoodboard,  setOverallMoodboard]  = useState<OverallMoodboard | null>(null);
+  const [roomMoodboards,    setRoomMoodboards]    = useState<RoomMoodboard[]>([]);
+  const [styleSet,          setStyleSet]          = useState(false);
 
   const STEPS = [
     { num: "1", label: "Upload",     status: "complete" as const },
@@ -65,8 +64,8 @@ export default function MoodboardsPage() {
   useEffect(() => {
     fetch(`/api/projects/${id}`)
       .then((r) => r.json())
-      .then((d) => {
-        const p: Project = d.project;
+      .then((d: { project: Project }) => {
+        const p = d.project;
         setProject(p);
         if (p.styleProfile) {
           setOverallStyle(p.styleProfile.overallStyle);
@@ -75,128 +74,68 @@ export default function MoodboardsPage() {
           setHardNo(p.styleProfile.hardNo ?? "");
           setStyleSet(true);
         }
-        if (p.moodboards && p.moodboards.length > 0) {
-          setMoodboards(p.moodboards);
-        }
+        if (p.overallMoodboard)                  setOverallMoodboard(p.overallMoodboard);
+        if (p.roomMoodboards && p.roomMoodboards.length > 0) setRoomMoodboards(p.roomMoodboards);
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [id]);
 
-  // ── Generate all moodboards (one room at a time for live updates) ─────────
-  async function generateAll() {
-    if (!project?.analysis) return;
-    setGeneratingAll(true);
+  async function generate() {
+    setGenerating(true);
     setGlobalError(null);
-    setShowWarmupNotice(false);
+    setCurrentStep("Building overall style collage…");
 
-    const styleProfile: StyleProfile = { overallStyle, palette, budgetVibe, hardNo };
+    const warmupTimer = setTimeout(() => setShowWarmup(true), 6000);
 
-    // Determine target rooms from analysis
-    const KEY_ROOMS = ["Living Room", "Kitchen", "Master Bedroom"];
-    const detectedNames = project.analysis.rooms.map((r) => r.name);
-    const targetRooms = KEY_ROOMS.filter((kr) =>
-      detectedNames.some((dn) => dn.toLowerCase().includes(kr.toLowerCase()))
-    );
-    const finalRooms = targetRooms.length > 0 ? targetRooms : detectedNames.slice(0, 3);
+    try {
+      const styleProfile: StyleProfile = { overallStyle, palette, budgetVibe, hardNo };
 
-    // Initialise all rooms as "generating"
-    setRoomStatuses(finalRooms.map((name) => ({ roomName: name, state: "generating" })));
+      setCurrentStep("Generating overall moodboard…");
+      const res = await fetch("/api/moodboards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id, styleProfile }),
+      });
 
-    // Show warmup notice after 8 seconds if still going
-    const warmupTimer = setTimeout(() => setShowWarmupNotice(true), 8000);
-
-    let anySuccess = false;
-
-    // Generate rooms sequentially — HF free tier handles one at a time better
-    const newMoodboards: Moodboard[] = [...moodboards.filter((m) => !finalRooms.includes(m.roomName))];
-
-    for (const roomName of finalRooms) {
-      try {
-        const res = await fetch("/api/moodboards", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId: id, styleProfile, rooms: [roomName] }),
-        });
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({ error: "Unknown error" }));
-          throw new Error(errData.error ?? `HTTP ${res.status}`);
-        }
-
-        const data = await res.json();
-        // Extract the newly generated moodboard for this room
-        const generated = (data.moodboards as Moodboard[]).find((m) => m.roomName === roomName);
-        if (generated) {
-          newMoodboards.push(generated);
-          setMoodboards([...newMoodboards]);
-          anySuccess = true;
-        }
-
-        setRoomStatuses((prev) =>
-          prev.map((s) => s.roomName === roomName ? { ...s, state: "done" } : s)
-        );
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Generation failed";
-        setRoomStatuses((prev) =>
-          prev.map((s) => s.roomName === roomName ? { ...s, state: "error", error: msg } : s)
-        );
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "Generation failed");
       }
-    }
 
-    clearTimeout(warmupTimer);
-    setShowWarmupNotice(false);
-
-    if (anySuccess) {
+      const data = await res.json();
+      setOverallMoodboard(data.overallMoodboard);
+      setRoomMoodboards(data.roomMoodboards);
       setStyleSet(true);
       setProject((p) => p ? { ...p, status: "styled" } : p);
-    } else {
-      setGlobalError("All rooms failed to generate. Check your HF_TOKEN or try again.");
+    } catch (err) {
+      setGlobalError(err instanceof Error ? err.message : "Generation failed");
+    } finally {
+      clearTimeout(warmupTimer);
+      setShowWarmup(false);
+      setCurrentStep("");
+      setGenerating(false);
     }
-
-    setGeneratingAll(false);
   }
 
-  // ── Regenerate a single room ───────────────────────────────────────────────
   async function regenerateRoom(roomName: string) {
-    setRoomStatuses((prev) => {
-      const existing = prev.find((s) => s.roomName === roomName);
-      if (existing) return prev.map((s) => s.roomName === roomName ? { ...s, state: "generating", error: undefined } : s);
-      return [...prev, { roomName, state: "generating" }];
-    });
-
-    // Show warmup notice after 8s for single room too
-    const warmupTimer = setTimeout(() => setShowWarmupNotice(true), 8000);
+    const styleProfile: StyleProfile = { overallStyle, palette, budgetVibe, hardNo };
+    const warmupTimer = setTimeout(() => setShowWarmup(true), 6000);
 
     try {
       const res = await fetch("/api/moodboards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: id,
-          styleProfile: { overallStyle, palette, budgetVibe, hardNo },
-          rooms: [roomName],
-        }),
+        body: JSON.stringify({ projectId: id, styleProfile, rooms: [roomName] }),
       });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ error: "Unknown error" }));
-        throw new Error(errData.error ?? `HTTP ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error("Regeneration failed");
       const data = await res.json();
-      setMoodboards(data.moodboards as Moodboard[]);
-      setRoomStatuses((prev) =>
-        prev.map((s) => s.roomName === roomName ? { ...s, state: "done" } : s)
-      );
+      setRoomMoodboards(data.roomMoodboards);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Regeneration failed";
-      setRoomStatuses((prev) =>
-        prev.map((s) => s.roomName === roomName ? { ...s, state: "error", error: msg } : s)
-      );
+      setGlobalError(err instanceof Error ? err.message : "Regeneration failed");
     } finally {
       clearTimeout(warmupTimer);
-      setShowWarmupNotice(false);
+      setShowWarmup(false);
     }
   }
 
@@ -205,20 +144,19 @@ export default function MoodboardsPage() {
   if (!project.analysis) {
     return (
       <div className="max-w-xl mx-auto px-6 py-24 text-center space-y-4">
-        <p className="text-stone-500">Please complete plan analysis first.</p>
-        <a href={`/project/${id}/review`} className="btn-primary inline-flex">Go to Review</a>
+        <p className="text-stone-500">Complete plan analysis first.</p>
+        <a href={`/project/${id}/review`} className="btn-primary inline-flex">Go to Review →</a>
       </div>
     );
   }
 
-  const isAnyGenerating = roomStatuses.some((s) => s.state === "generating");
-  const doneCount       = roomStatuses.filter((s) => s.state === "done").length;
-  const totalCount      = roomStatuses.length;
+  const hasResults = overallMoodboard !== null || roomMoodboards.length > 0;
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-12">
+    <div className="max-w-6xl mx-auto px-6 py-12">
+
       {/* Header */}
-      <div className="mb-10 fade-up fade-up-1">
+      <div className="mb-8 fade-up fade-up-1">
         <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
           <StepIndicator steps={STEPS} />
         </div>
@@ -227,19 +165,18 @@ export default function MoodboardsPage() {
           Style & Moodboards
         </h1>
         <p className="text-stone-500 text-sm">
-          Tell us the design direction and we'll generate interior moodboards for each key room.
+          Set the interior direction, then we'll build an overall style collage and room-by-room moodboards with plan snippets.
         </p>
       </div>
 
-      {/* HF warmup notice */}
-      {showWarmupNotice && (
-        <div className="mb-6 border border-amber-200 bg-amber-50 rounded-sm px-4 py-3 flex items-start gap-3 fade-up fade-up-1">
+      {/* Warmup notice */}
+      {showWarmup && (
+        <div className="mb-6 border border-amber-200 bg-amber-50 rounded-sm px-4 py-3 flex items-start gap-3">
           <span className="text-amber-500 mt-0.5 flex-shrink-0">⏳</span>
           <div>
-            <p className="text-sm text-amber-800 font-medium">AI model warming up</p>
+            <p className="text-sm text-amber-800 font-medium">Working on it…</p>
             <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
-              Hugging Face free tier models have cold starts — first image can take 20–40 seconds.
-              Subsequent rooms will be faster. Please wait.
+              Cropping plan snippets and preparing {roomMoodboards.length > 0 ? "additional" : ""} moodboards. This can take 10–20s.
             </p>
           </div>
         </div>
@@ -248,51 +185,53 @@ export default function MoodboardsPage() {
       {/* Global error */}
       {globalError && (
         <div className="mb-6 border border-red-200 bg-red-50 rounded-sm px-4 py-3 flex items-start gap-3">
-          <span className="text-red-400 mt-0.5 flex-shrink-0">✕</span>
-          <div className="flex-1">
+          <span className="text-red-400 mt-0.5">✕</span>
+          <div>
             <p className="text-sm text-red-700">{globalError}</p>
-            <button type="button" onClick={() => setGlobalError(null)}
-              className="font-mono text-[10px] text-red-500 mt-1 underline">Dismiss</button>
+            <button onClick={() => setGlobalError(null)} className="font-mono text-[10px] text-red-400 mt-1 underline">Dismiss</button>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+      {/* ── Layout: questionnaire left, results right ─────────────────────── */}
+      <div className={`grid gap-8 ${hasResults ? "grid-cols-1 lg:grid-cols-4" : "grid-cols-1 lg:grid-cols-5"}`}>
 
-        {/* ── Left: Style questionnaire ────────────────────────────────── */}
-        <div className="lg:col-span-2 space-y-5 fade-up fade-up-2">
+        {/* ── Style questionnaire ───────────────────────────────────────── */}
+        <div className={`space-y-4 fade-up fade-up-2 ${hasResults ? "lg:col-span-1" : "lg:col-span-2"}`}>
 
           {/* Overall style */}
-          <div className="card p-5 space-y-4">
-            <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">01 — Overall Style</p>
-            <div className="grid grid-cols-2 gap-2">
+          <div className="card p-4 space-y-3">
+            <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">01 — Style</p>
+            <div className="grid grid-cols-2 gap-1.5">
               {STYLE_OPTIONS.map((opt) => (
-                <button key={opt.value} type="button" onClick={() => setOverallStyle(opt.value)}
-                  disabled={isAnyGenerating}
-                  className={`text-left p-3 border rounded-sm transition-all disabled:opacity-50 ${
+                <button key={opt.value} type="button"
+                  disabled={generating}
+                  onClick={() => setOverallStyle(opt.value)}
+                  className={`text-left p-2.5 border rounded-sm transition-all disabled:opacity-50 ${
                     overallStyle === opt.value ? "border-stone-900 bg-white" : "border-stone-200 hover:border-stone-400"
                   }`}>
-                  <p className="font-mono text-[10px] uppercase tracking-wider text-stone-800 mb-0.5">{opt.value}</p>
-                  <p className="text-[10px] text-stone-400">{opt.desc}</p>
+                  <p className="font-mono text-[9px] uppercase tracking-wider text-stone-800">{opt.value}</p>
+                  <p className="text-[9px] text-stone-400 mt-0.5 leading-tight hidden lg:block">{opt.desc}</p>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Palette */}
-          <div className="card p-5 space-y-4">
-            <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">02 — Colour Palette</p>
-            <div className="space-y-2">
+          <div className="card p-4 space-y-3">
+            <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">02 — Palette</p>
+            <div className="space-y-1.5">
               {PALETTE_OPTIONS.map((opt) => (
-                <button key={opt.value} type="button" onClick={() => setPalette(opt.value)}
-                  disabled={isAnyGenerating}
-                  className={`w-full text-left p-3 border rounded-sm transition-all flex items-center gap-3 disabled:opacity-50 ${
+                <button key={opt.value} type="button"
+                  disabled={generating}
+                  onClick={() => setPalette(opt.value)}
+                  className={`w-full flex items-center gap-2.5 p-2.5 border rounded-sm transition-all disabled:opacity-50 ${
                     palette === opt.value ? "border-stone-900 bg-white" : "border-stone-200 hover:border-stone-400"
                   }`}>
                   <PaletteSwatch palette={opt.value} />
                   <div>
-                    <p className="font-mono text-[10px] uppercase tracking-wider text-stone-800">{opt.label}</p>
-                    <p className="text-[10px] text-stone-400">{opt.desc}</p>
+                    <p className="font-mono text-[9px] uppercase tracking-wider text-stone-800">{opt.label}</p>
+                    <p className="text-[9px] text-stone-400 hidden lg:block">{opt.desc}</p>
                   </div>
                 </button>
               ))}
@@ -300,132 +239,137 @@ export default function MoodboardsPage() {
           </div>
 
           {/* Budget */}
-          <div className="card p-5 space-y-4">
-            <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">03 — Budget Vibe</p>
-            <div className="grid grid-cols-3 gap-2">
+          <div className="card p-4 space-y-3">
+            <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">03 — Budget</p>
+            <div className="grid grid-cols-3 gap-1.5">
               {BUDGET_OPTIONS.map((opt) => (
-                <button key={opt.value} type="button" onClick={() => setBudgetVibe(opt.value)}
-                  disabled={isAnyGenerating}
-                  className={`text-center p-3 border rounded-sm transition-all disabled:opacity-50 ${
+                <button key={opt.value} type="button"
+                  disabled={generating}
+                  onClick={() => setBudgetVibe(opt.value)}
+                  className={`text-center p-2.5 border rounded-sm transition-all disabled:opacity-50 ${
                     budgetVibe === opt.value ? "border-stone-900 bg-white" : "border-stone-200 hover:border-stone-400"
                   }`}>
-                  <p className="font-mono text-[10px] uppercase tracking-wider text-stone-800 mb-0.5">{opt.label}</p>
-                  <p className="text-[10px] text-stone-400 leading-tight">{opt.desc}</p>
+                  <p className="font-mono text-[9px] uppercase tracking-wider text-stone-800">{opt.label}</p>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Hard no */}
-          <div className="card p-5 space-y-3">
-            <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">04 — Hard No (optional)</p>
-            <p className="text-[11px] text-stone-400">Anything to avoid in the interiors?</p>
+          <div className="card p-4 space-y-2">
+            <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">04 — Avoid</p>
             <textarea className="field-input text-sm resize-none" rows={2}
-              placeholder="e.g. no bright colours, no marble, no dark wood"
+              placeholder="e.g. no marble, no dark wood"
               value={hardNo} onChange={(e) => setHardNo(e.target.value)}
-              disabled={isAnyGenerating} />
+              disabled={generating} />
           </div>
 
-          {/* Generate button + progress */}
-          <div className="space-y-3">
-            <button onClick={generateAll} disabled={generatingAll}
-              className="btn-primary w-full justify-center">
-              {generatingAll ? (
-                <><span className="spinner" />
-                  <span>
-                    {totalCount > 0
-                      ? `Generating ${doneCount + 1} of ${totalCount}…`
-                      : "Starting…"}
-                  </span>
-                </>
-              ) : styleSet && moodboards.length > 0
-                ? "↻ Regenerate All Moodboards"
-                : "Generate Moodboards →"}
-            </button>
-
-            {/* Progress bar while generating */}
-            {generatingAll && totalCount > 0 && (
-              <div>
-                <div className="progress-bar">
-                  <div className="progress-bar-fill"
-                    style={{ width: `${(doneCount / totalCount) * 100}%` }} />
-                </div>
-                <div className="flex justify-between mt-1">
-                  {roomStatuses.map((s) => (
-                    <div key={s.roomName} className="flex items-center gap-1">
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        s.state === "done"       ? "bg-amber-500" :
-                        s.state === "generating" ? "bg-stone-400 animate-pulse" :
-                        s.state === "error"      ? "bg-red-400" :
-                        "bg-stone-200"
-                      }`} />
-                      <span className="font-mono text-[9px] text-stone-400 uppercase truncate max-w-[60px]">
-                        {s.roomName.split(" ")[0]}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Provider hint */}
-            <p className="font-mono text-[9px] text-stone-400 text-center leading-relaxed">
-              {process.env.NODE_ENV === "development"
-                ? "Set HF_TOKEN in .env.local for real AI images"
-                : "Powered by Hugging Face FLUX · Free tier"}
-            </p>
-          </div>
+          {/* Generate button */}
+          <button onClick={generate} disabled={generating} className="btn-primary w-full justify-center">
+            {generating ? (
+              <><span className="spinner" /><span>{currentStep || "Generating…"}</span></>
+            ) : hasResults
+              ? "↻ Regenerate All"
+              : "Generate Moodboards →"}
+          </button>
         </div>
 
-        {/* ── Right: Moodboard tiles ───────────────────────────────────── */}
-        <div className="lg:col-span-3 fade-up fade-up-3">
-          {moodboards.length === 0 && !generatingAll ? (
-            <EmptyMoodboardsState />
-          ) : (
-            <div className="space-y-6">
-              <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">
-                Generated Moodboards
+        {/* ── Results ───────────────────────────────────────────────────── */}
+        <div className={`space-y-10 fade-up fade-up-3 ${hasResults ? "lg:col-span-3" : "lg:col-span-3"}`}>
+
+          {/* Empty state */}
+          {!hasResults && !generating && (
+            <div className="h-80 border border-dashed border-stone-200 rounded-sm flex flex-col items-center justify-center text-center p-12 space-y-3">
+              <p className="font-mono text-xs text-stone-400 uppercase tracking-widest">Moodboards will appear here</p>
+              <p className="text-xs text-stone-400 max-w-xs leading-relaxed">
+                Choose your style on the left, then click Generate Moodboards.
+                We'll create an overall style collage plus room-by-room references with plan snippets.
               </p>
+            </div>
+          )}
 
-              {/* Rooms currently being generated (skeleton placeholders) */}
-              {roomStatuses.filter((s) => s.state === "generating" && !moodboards.find((m) => m.roomName === s.roomName)).map((s) => (
-                <GeneratingPlaceholder key={s.roomName} roomName={s.roomName} />
+          {/* Generating skeleton */}
+          {generating && (
+            <div className="space-y-8">
+              <div className="space-y-3">
+                <div className="skeleton h-5 w-48" />
+                <div className="skeleton aspect-video w-full" />
+              </div>
+              {[1,2,3].map((i) => (
+                <div key={i} className="space-y-3">
+                  <div className="skeleton h-4 w-32" />
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="skeleton aspect-video" />
+                    <div className="skeleton aspect-video" />
+                    <div className="skeleton aspect-video" />
+                  </div>
+                </div>
               ))}
+            </div>
+          )}
 
-              {/* Completed moodboards */}
-              {moodboards.map((mb) => {
-                const status = roomStatuses.find((s) => s.roomName === mb.roomName);
-                const roomDetail = project.analysis?.rooms.find((r) => r.name === mb.roomName);
-                return (
-                  <MoodboardTile
-                    key={mb.roomName}
-                    moodboard={mb}
-                    roomDetail={roomDetail}
-                    isRegenerating={status?.state === "generating"}
-                    error={status?.state === "error" ? status.error : undefined}
-                    onRegenerate={() => regenerateRoom(mb.roomName)}
-                  />
-                );
-              })}
+          {/* ── Section 1: Overall style moodboard ──────────────────────── */}
+          {overallMoodboard && !generating && (
+            <section className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-1 h-6 rounded-sm" style={{ backgroundColor: "var(--c-accent)" }} />
+                <div>
+                  <p className="font-mono text-xs uppercase tracking-widest text-stone-700">
+                    Overall Interior Style
+                  </p>
+                  <p className="text-xs text-stone-400 mt-0.5 italic">{overallMoodboard.styleStatement}</p>
+                </div>
+              </div>
 
-              {/* Error rooms that have no image yet */}
-              {roomStatuses.filter((s) => s.state === "error" && !moodboards.find((m) => m.roomName === s.roomName)).map((s) => (
-                <RoomErrorTile
-                  key={s.roomName}
-                  roomName={s.roomName}
-                  error={s.error}
-                  onRetry={() => regenerateRoom(s.roomName)}
+              {/* 2+2 grid collage */}
+              <div className="grid grid-cols-2 gap-2">
+                {overallMoodboard.images.slice(0, 4).map((img, i) => (
+                  <div key={i} className="group relative overflow-hidden rounded-sm aspect-video">
+                    <img src={img.url} alt={img.caption}
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <span className="absolute bottom-2 left-3 font-mono text-[10px] text-white uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                      {img.caption}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2">
+                  <Tag>{overallStyle}</Tag>
+                  <Tag>{palette.replace(/([A-Z])/g, " $1").trim()}</Tag>
+                  <Tag>{budgetVibe}</Tag>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* ── Section 2: Per-room moodboards ──────────────────────────── */}
+          {roomMoodboards.length > 0 && !generating && (
+            <section className="space-y-10">
+              <div className="flex items-center gap-4">
+                <span className="font-mono text-xs tracking-widest text-stone-400 uppercase">Space by Space</span>
+                <div className="flex-1 h-px bg-stone-200" />
+              </div>
+
+              {roomMoodboards.map((rm) => (
+                <RoomSection
+                  key={rm.roomName}
+                  room={rm}
+                  project={project}
+                  onRegenerate={() => regenerateRoom(rm.roomName)}
                 />
               ))}
+            </section>
+          )}
 
-              {/* Continue CTA */}
-              {moodboards.length > 0 && !generatingAll && (
-                <div className="pt-2 flex justify-end">
-                  <a href={`/project/${id}/export`} className="btn-primary">
-                    <span>Review & Export</span><span>→</span>
-                  </a>
-                </div>
-              )}
+          {/* Continue CTA */}
+          {hasResults && !generating && (
+            <div className="flex justify-end pt-4 border-t border-stone-200">
+              <a href={`/project/${id}/export`} className="btn-primary">
+                Review & Export →
+              </a>
             </div>
           )}
         </div>
@@ -434,155 +378,168 @@ export default function MoodboardsPage() {
   );
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── Room Section ─────────────────────────────────────────────────────────────
 
-function MoodboardTile({
-  moodboard,
-  roomDetail,
-  isRegenerating,
-  error,
+function RoomSection({
+  room,
+  project,
   onRegenerate,
 }: {
-  moodboard: Moodboard;
-  roomDetail?: { sizeEstimateSqm?: number; orientation?: string; specialFeatures?: string[] };
-  isRegenerating: boolean;
-  error?: string;
+  room: RoomMoodboard;
+  project: Project;
   onRegenerate: () => void;
 }) {
-  const [imgLoaded, setImgLoaded] = useState(false);
-  const [imgError,  setImgError]  = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const roomDetail = project.analysis?.rooms.find((r) => r.name === room.roomName);
 
-  // Reset img state when URL changes (new generation)
-  useEffect(() => { setImgLoaded(false); setImgError(false); }, [moodboard.imageUrl]);
+  async function handleRegenerate() {
+    setRegenerating(true);
+    await onRegenerate();
+    setRegenerating(false);
+  }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
       {/* Room header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="font-mono text-xs uppercase tracking-widest text-stone-600">{moodboard.roomName}</p>
+        <div className="flex items-center gap-3">
+          <p className="font-mono text-sm uppercase tracking-widest text-stone-800 font-medium">
+            {room.roomName}
+          </p>
           {roomDetail?.sizeEstimateSqm && (
-            <span className="font-mono text-[9px] text-stone-400 border border-stone-200 px-1.5 py-0.5 rounded-sm">
+            <span className="font-mono text-[10px] text-stone-400 border border-stone-200 px-2 py-0.5 rounded-sm">
               ~{roomDetail.sizeEstimateSqm} m²
             </span>
           )}
           {roomDetail?.orientation && (
-            <span className="font-mono text-[9px] text-stone-400 hidden sm:inline">{roomDetail.orientation}</span>
+            <span className="font-mono text-[10px] text-stone-400 hidden sm:inline">
+              {roomDetail.orientation}
+            </span>
           )}
         </div>
-        <button onClick={onRegenerate} disabled={isRegenerating} className="btn-ghost text-[10px]">
-          {isRegenerating ? (
-            <><span className="spinner w-3 h-3" style={{ borderWidth: 1 }} /><span>Generating…</span></>
-          ) : "↻ Regenerate"}
+        <button onClick={handleRegenerate} disabled={regenerating}
+          className="btn-ghost text-[10px]">
+          {regenerating ? <><span className="spinner w-3 h-3" style={{borderWidth:1}} /> Regenerating…</> : "↻ Regenerate"}
         </button>
       </div>
 
-      {/* Error state on existing tile */}
-      {error && (
-        <div className="border border-red-100 bg-red-50 rounded-sm px-3 py-2 text-xs text-red-600">
-          Failed to regenerate: {error}
+      {/* Plan snippet + image grid */}
+      <div className="grid grid-cols-4 gap-2 items-start">
+
+        {/* Plan snippet — col 1 */}
+        <div className="col-span-1">
+          <p className="font-mono text-[9px] text-stone-400 uppercase tracking-widest mb-1.5">Plan</p>
+          {room.planSnippetUrl ? (
+            <div className="border border-stone-200 rounded-sm overflow-hidden bg-white">
+              <img src={room.planSnippetUrl} alt={`${room.roomName} plan`}
+                className="w-full object-contain"
+                style={{ imageRendering: "crisp-edges", maxHeight: "160px" }} />
+              <div className="px-2 py-1.5 border-t border-stone-100">
+                <p className="font-mono text-[9px] text-stone-400 truncate">{room.roomName}</p>
+                {roomDetail?.sizeEstimateSqm && (
+                  <p className="font-mono text-[9px] text-stone-300">{roomDetail.sizeEstimateSqm} m²</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="border border-dashed border-stone-200 rounded-sm flex items-center justify-center bg-stone-50 h-32">
+              <p className="font-mono text-[9px] text-stone-300 uppercase text-center px-2">Plan snippet unavailable</p>
+            </div>
+          )}
+
+          {/* Special features */}
+          {roomDetail?.specialFeatures && roomDetail.specialFeatures.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {roomDetail.specialFeatures.slice(0, 3).map((f) => (
+                <span key={f} className="block font-mono text-[9px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded-sm truncate">
+                  {f}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Image */}
-      <div className="moodboard-tile aspect-video overflow-hidden relative">
-        {isRegenerating && (
-          <div className="absolute inset-0 bg-stone-100 flex flex-col items-center justify-center gap-3 z-10">
-            <span className="spinner w-6 h-6 text-stone-400" style={{ borderWidth: 1.5 }} />
-            <p className="font-mono text-[10px] text-stone-400 uppercase tracking-widest">Generating…</p>
+        {/* Mood images — cols 2-4 */}
+        <div className="col-span-3">
+          <p className="font-mono text-[9px] text-stone-400 uppercase tracking-widest mb-1.5">Moodboard</p>
+          <div className="grid grid-cols-3 gap-2">
+            {room.images.slice(0, 3).map((img, i) => (
+              <MoodImageTile key={i} img={img} index={i} isHero={i === 0} />
+            ))}
           </div>
-        )}
-        {!imgLoaded && !isRegenerating && !imgError && (
-          <div className="absolute inset-0 skeleton" />
-        )}
-        {imgError ? (
-          <div className="absolute inset-0 bg-stone-100 flex flex-col items-center justify-center gap-2">
-            <p className="font-mono text-[10px] text-stone-400">Image failed to load</p>
-            <button onClick={onRegenerate} className="btn-ghost text-[10px]">↻ Retry</button>
-          </div>
-        ) : (
-          <img src={moodboard.imageUrl} alt={`${moodboard.roomName} moodboard`}
-            className={`w-full h-full object-cover transition-opacity duration-500 ${imgLoaded ? "opacity-100" : "opacity-0"}`}
-            onLoad={() => setImgLoaded(true)}
-            onError={() => setImgError(true)} />
-        )}
-        <div className="overlay" />
-      </div>
-
-      {/* Special features */}
-      {roomDetail?.specialFeatures && roomDetail.specialFeatures.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {roomDetail.specialFeatures.map((f) => (
-            <span key={f} className="font-mono text-[9px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded-sm">
-              {f}
-            </span>
-          ))}
+          {/* 4th image as a wide strip if present */}
+          {room.images[3] && (
+            <div className="mt-2 group relative overflow-hidden rounded-sm" style={{ height: "80px" }}>
+              <img src={room.images[3].url} alt={room.images[3].caption}
+                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/40 to-transparent" />
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[10px] text-white uppercase tracking-widest">
+                {room.images[3].caption}
+              </span>
+            </div>
+          )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Single mood image tile ───────────────────────────────────────────────────
+
+function MoodImageTile({
+  img, index, isHero,
+}: {
+  img: { url: string; caption?: string };
+  index: number;
+  isHero: boolean;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [error,  setError]  = useState(false);
+
+  return (
+    <div className={`group relative overflow-hidden rounded-sm ${isHero ? "row-span-1" : ""}`}
+      style={{ aspectRatio: "4/3" }}>
+      {!loaded && !error && <div className="absolute inset-0 skeleton" />}
+      {error ? (
+        <div className="absolute inset-0 bg-stone-100 flex items-center justify-center">
+          <p className="font-mono text-[9px] text-stone-300">Failed to load</p>
+        </div>
+      ) : (
+        <img src={img.url} alt={img.caption ?? `Image ${index + 1}`}
+          className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-105 ${loaded ? "opacity-100" : "opacity-0"}`}
+          onLoad={() => setLoaded(true)}
+          onError={() => setError(true)} />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+      {img.caption && (
+        <span className="absolute bottom-2 left-2 font-mono text-[9px] text-white uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+          {img.caption}
+        </span>
       )}
     </div>
   );
 }
 
-function GeneratingPlaceholder({ roomName }: { roomName: string }) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-xs uppercase tracking-widest text-stone-600">{roomName}</p>
-        <span className="font-mono text-[9px] text-stone-400 uppercase tracking-widest">Generating…</span>
-      </div>
-      <div className="aspect-video bg-stone-100 rounded-sm flex flex-col items-center justify-center gap-3 border border-stone-200">
-        <span className="spinner w-6 h-6 text-stone-400" style={{ borderWidth: 1.5 }} />
-        <p className="font-mono text-[10px] text-stone-400 uppercase tracking-widest animate-pulse">
-          Building moodboard…
-        </p>
-      </div>
-    </div>
-  );
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function RoomErrorTile({ roomName, error, onRetry }: { roomName: string; error?: string; onRetry: () => void }) {
+function Tag({ children }: { children: React.ReactNode }) {
   return (
-    <div className="space-y-2">
-      <p className="font-mono text-xs uppercase tracking-widest text-stone-600">{roomName}</p>
-      <div className="aspect-video border border-red-100 bg-red-50 rounded-sm flex flex-col items-center justify-center gap-3 p-6 text-center">
-        <p className="font-mono text-[10px] text-red-500 uppercase tracking-widest">Generation failed</p>
-        {error && <p className="text-xs text-red-400 max-w-xs leading-relaxed">{error}</p>}
-        <button onClick={onRetry} className="btn-secondary text-xs">↻ Try again</button>
-      </div>
-    </div>
-  );
-}
-
-function EmptyMoodboardsState() {
-  return (
-    <div className="h-full min-h-[400px] border border-dashed border-stone-200 rounded-sm flex flex-col items-center justify-center text-center p-12 space-y-4">
-      <div className="w-10 h-10 border border-stone-200 rounded-sm flex items-center justify-center">
-        <svg className="w-5 h-5 text-stone-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 002 2v12a2 2 0 002 2z" />
-        </svg>
-      </div>
-      <p className="font-mono text-xs text-stone-400 uppercase tracking-widest">Moodboards will appear here</p>
-      <p className="text-xs text-stone-400 max-w-xs leading-relaxed">
-        Set your style preferences on the left, then click Generate Moodboards.
-      </p>
-      <p className="font-mono text-[9px] text-stone-300 leading-relaxed max-w-[200px]">
-        First generation may take 20–40s on free tier while the AI model warms up.
-      </p>
-    </div>
+    <span className="font-mono text-[9px] uppercase tracking-widest text-stone-500 border border-stone-200 px-2 py-0.5 rounded-sm">
+      {children}
+    </span>
   );
 }
 
 function PaletteSwatch({ palette }: { palette: Palette }) {
   const colors: Record<Palette, string[]> = {
-    LightAiry:   ["#f9f7f4", "#e8e4dc", "#d4cec4"],
-    NeutralWarm: ["#c4a882", "#b08860", "#8b6540"],
-    DarkMoody:   ["#2d2d2d", "#1a3a2a", "#3d2a1a"],
+    LightAiry:   ["#f9f7f4","#e8e4dc","#d4cec4"],
+    NeutralWarm: ["#c4a882","#b08860","#8b6540"],
+    DarkMoody:   ["#2d2d2d","#1a3a2a","#3d2a1a"],
   };
   return (
     <div className="flex gap-0.5 flex-shrink-0">
       {colors[palette].map((c, i) => (
-        <div key={i} className="w-4 h-7 rounded-sm" style={{ backgroundColor: c }} />
+        <div key={i} className="w-3 h-6 rounded-sm" style={{ backgroundColor: c }} />
       ))}
     </div>
   );
@@ -590,13 +547,10 @@ function PaletteSwatch({ palette }: { palette: Palette }) {
 
 function PageSkeleton() {
   return (
-    <div className="max-w-5xl mx-auto px-6 py-12 space-y-8">
-      <div className="skeleton h-6 w-64" />
-      <div className="skeleton h-8 w-48" />
+    <div className="max-w-6xl mx-auto px-6 py-12 space-y-8">
+      <div className="skeleton h-6 w-64" /><div className="skeleton h-8 w-48" />
       <div className="grid grid-cols-5 gap-8">
-        <div className="col-span-2 space-y-4">
-          <div className="skeleton h-64" /><div className="skeleton h-48" />
-        </div>
+        <div className="col-span-2 space-y-4"><div className="skeleton h-64" /><div className="skeleton h-48" /></div>
         <div className="col-span-3 skeleton h-[520px]" />
       </div>
     </div>

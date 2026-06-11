@@ -27,7 +27,7 @@ import fs from "fs";
 import https from "https";
 import http from "http";
 import path from "path";
-import type { PlanAnalysis, PlotInfo, RoomDetail, StyleProfile } from "@/types";
+import type { PlanAnalysis, PlotInfo, RoomDetail, StyleProfile, MoodImage, RoomMoodboard, OverallMoodboard } from "@/types";
 import { saveUploadedFile } from "@/lib/store";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -320,6 +320,33 @@ export async function generateMoodboardImage(
   if (process.env.OPENAI_API_KEY) return generateWithDallE(room, style);
   return moodboardStub(room, style);
   */
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW: MULTI-IMAGE ROOM MOODBOARDS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Generate 3-4 mood images for a specific room.
+ * In real mode: call image API 3-4 times with varied prompts.
+ * In stub mode: return curated Unsplash photos.
+ */
+export async function generateRoomMoodboard(
+  room: RoomDetail,
+  style: StyleProfile
+): Promise<MoodImage[]> {
+  return roomMoodboardStub(room, style);
+}
+
+/**
+ * Generate the overall whole-home style moodboard (4 hero images).
+ * Shows the full interior language of the project.
+ */
+export async function generateOverallMoodboard(
+  rooms: RoomDetail[],
+  style: StyleProfile
+): Promise<OverallMoodboard> {
+  return overallMoodboardStub(rooms, style);
 }
 
 // ── Hugging Face Inference API (FREE) ─────────────────────────────────────────
@@ -674,99 +701,120 @@ async function strengthsStub(analysis: PlanAnalysis, plotInfo?: PlotInfo): Promi
   return bullets.slice(0, 6);
 }
 
+// ─── Curated Unsplash photo library ──────────────────────────────────────────
+
+const ROOM_PHOTOS: Record<string, Record<string, string[]>> = {
+  "Living Room": {
+    Modern:       ["photo-1567767292278-a204e43f6cd1","photo-1555041469-a586c61ea9bc","photo-1618221195710-dd6b41faaea6","photo-1600210491369-e753d80a41f3"],
+    Contemporary: ["photo-1555041469-a586c61ea9bc","photo-1586023492125-27b2c045efd7","photo-1616486338812-3dadae4b4ace","photo-1615529182904-14819c35db37"],
+    Scandinavian: ["photo-1586023492125-27b2c045efd7","photo-1556020685-ae41abfc9365","photo-1565182999561-18d7dc61c393","photo-1583847268964-b28dc8f51f92"],
+    Minimal:      ["photo-1449247709967-d4461a6a6103","photo-1505693416388-ac5ce068fe85","photo-1513694203232-719a280e022f","photo-1567767292278-a204e43f6cd1"],
+    Industrial:   ["photo-1505409628601-edc9af17fda6","photo-1493809842364-78817add7ffb","photo-1560185893-a55cbc8c57e8","photo-1515263487990-61b07816b324"],
+    Classic:      ["photo-1540518614846-7eded433c457","photo-1616594039964-ae9021a400a0","photo-1600607687939-ce8a6c25118c","photo-1560185007-cde436f6a4d0"],
+  },
+  "Kitchen": {
+    Modern:       ["photo-1556909114-f6e7ad7d3136","photo-1556909172-54557c7e4fb7","photo-1565183997392-2f6f122e5912","photo-1556909045-9e56fa833e9c"],
+    Contemporary: ["photo-1565183997392-2f6f122e5912","photo-1556909114-f6e7ad7d3136","photo-1588854337221-4cf9fa96059c","photo-1556909172-54557c7e4fb7"],
+    Scandinavian: ["photo-1588854337221-4cf9fa96059c","photo-1556909114-f6e7ad7d3136","photo-1556909172-54557c7e4fb7","photo-1565183997392-2f6f122e5912"],
+    Minimal:      ["photo-1556909172-54557c7e4fb7","photo-1556909114-f6e7ad7d3136","photo-1556909045-9e56fa833e9c","photo-1565183997392-2f6f122e5912"],
+    Industrial:   ["photo-1585515320310-259814833e62","photo-1556909114-f6e7ad7d3136","photo-1565183997392-2f6f122e5912","photo-1556909172-54557c7e4fb7"],
+    Classic:      ["photo-1556909045-9e56fa833e9c","photo-1565183997392-2f6f122e5912","photo-1588854337221-4cf9fa96059c","photo-1556909114-f6e7ad7d3136"],
+  },
+  "Master Bedroom": {
+    Modern:       ["photo-1631049307264-da0ec9d70304","photo-1588046130717-0eb0c9a3ba15","photo-1505693416388-ac5ce068fe85","photo-1540304801897-4bd1e5fe2a98"],
+    Contemporary: ["photo-1616594039964-ae9021a400a0","photo-1631049307264-da0ec9d70304","photo-1522771739844-6a9f6d5f14af","photo-1588046130717-0eb0c9a3ba15"],
+    Scandinavian: ["photo-1540304801897-4bd1e5fe2a98","photo-1505693416388-ac5ce068fe85","photo-1615873968403-89e068629265","photo-1631049307264-da0ec9d70304"],
+    Minimal:      ["photo-1505693416388-ac5ce068fe85","photo-1631049307264-da0ec9d70304","photo-1540304801897-4bd1e5fe2a98","photo-1522771739844-6a9f6d5f14af"],
+    Industrial:   ["photo-1493809842364-78817add7ffb","photo-1583847268964-b28dc8f51f92","photo-1631049307264-da0ec9d70304","photo-1505693416388-ac5ce068fe85"],
+    Classic:      ["photo-1616594039964-ae9021a400a0","photo-1522771739844-6a9f6d5f14af","photo-1540518614846-7eded433c457","photo-1631049307264-da0ec9d70304"],
+  },
+  "Bedroom 2": {
+    Modern:       ["photo-1588046130717-0eb0c9a3ba15","photo-1598928506311-c55ded91a20c","photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511"],
+    Contemporary: ["photo-1598928506311-c55ded91a20c","photo-1588046130717-0eb0c9a3ba15","photo-1615873968403-89e068629265","photo-1560448204-603b3fc33ddc"],
+    Scandinavian: ["photo-1615873968403-89e068629265","photo-1505691938895-1758d7feb511","photo-1588046130717-0eb0c9a3ba15","photo-1598928506311-c55ded91a20c"],
+    Minimal:      ["photo-1505691938895-1758d7feb511","photo-1560448204-603b3fc33ddc","photo-1598928506311-c55ded91a20c","photo-1615873968403-89e068629265"],
+    Industrial:   ["photo-1583847268964-b28dc8f51f92","photo-1588046130717-0eb0c9a3ba15","photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511"],
+    Classic:      ["photo-1522771739844-6a9f6d5f14af","photo-1616594039964-ae9021a400a0","photo-1598928506311-c55ded91a20c","photo-1588046130717-0eb0c9a3ba15"],
+  },
+  "Bedroom 3": {
+    Modern:       ["photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511","photo-1588046130717-0eb0c9a3ba15","photo-1598928506311-c55ded91a20c"],
+    Contemporary: ["photo-1598928506311-c55ded91a20c","photo-1560448204-603b3fc33ddc","photo-1615873968403-89e068629265","photo-1505691938895-1758d7feb511"],
+    Scandinavian: ["photo-1615873968403-89e068629265","photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511","photo-1598928506311-c55ded91a20c"],
+    Minimal:      ["photo-1505691938895-1758d7feb511","photo-1560448204-603b3fc33ddc","photo-1598928506311-c55ded91a20c","photo-1615873968403-89e068629265"],
+    Industrial:   ["photo-1583847268964-b28dc8f51f92","photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511","photo-1598928506311-c55ded91a20c"],
+    Classic:      ["photo-1522771739844-6a9f6d5f14af","photo-1616594039964-ae9021a400a0","photo-1560448204-603b3fc33ddc","photo-1598928506311-c55ded91a20c"],
+  },
+  "Bathroom":        { Modern: ["photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Contemporary: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1600566752355-35792bedcfea","photo-1507652955-f3dcef5a3be5"], Scandinavian: ["photo-1507652955-f3dcef5a3be5","photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1600566752355-35792bedcfea"], Minimal: ["photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600607687939-ce8a6c25118c","photo-1600566752355-35792bedcfea"], Industrial: ["photo-1603512500383-b6f84e07e79f","photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5"], Classic: ["photo-1600566752355-35792bedcfea","photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5"] },
+  "Master Bathroom": { Modern: ["photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Contemporary: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1600566752355-35792bedcfea","photo-1507652955-f3dcef5a3be5"], Scandinavian: ["photo-1507652955-f3dcef5a3be5","photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1600566752355-35792bedcfea"], Minimal: ["photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea","photo-1600607687939-ce8a6c25118c"], Industrial: ["photo-1603512500383-b6f84e07e79f","photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5"], Classic: ["photo-1600566752355-35792bedcfea","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600607687939-ce8a6c25118c"] },
+  "Common Bathroom": { Modern: ["photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Contemporary: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1600566752355-35792bedcfea","photo-1507652955-f3dcef5a3be5"], Scandinavian: ["photo-1507652955-f3dcef5a3be5","photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1600566752355-35792bedcfea"], Minimal: ["photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea","photo-1600607687939-ce8a6c25118c"], Industrial: ["photo-1603512500383-b6f84e07e79f","photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5"], Classic: ["photo-1600566752355-35792bedcfea","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600607687939-ce8a6c25118c"] },
+  "Balcony": {
+    Modern:       ["photo-1571026289496-e29ffee09ca3","photo-1567767292278-a204e43f6cd1","photo-1449247709967-d4461a6a6103","photo-1586023492125-27b2c045efd7"],
+    Contemporary: ["photo-1586023492125-27b2c045efd7","photo-1571026289496-e29ffee09ca3","photo-1556020685-ae41abfc9365","photo-1567767292278-a204e43f6cd1"],
+    Scandinavian: ["photo-1556020685-ae41abfc9365","photo-1571026289496-e29ffee09ca3","photo-1586023492125-27b2c045efd7","photo-1449247709967-d4461a6a6103"],
+    Minimal:      ["photo-1449247709967-d4461a6a6103","photo-1571026289496-e29ffee09ca3","photo-1567767292278-a204e43f6cd1","photo-1586023492125-27b2c045efd7"],
+    Industrial:   ["photo-1505409628601-edc9af17fda6","photo-1571026289496-e29ffee09ca3","photo-1515263487990-61b07816b324","photo-1560185893-a55cbc8c57e8"],
+    Classic:      ["photo-1540518614846-7eded433c457","photo-1571026289496-e29ffee09ca3","photo-1586023492125-27b2c045efd7","photo-1567767292278-a204e43f6cd1"],
+  },
+  "Pooja Room": { Modern: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Contemporary: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Scandinavian: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Minimal: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Industrial: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Classic: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"] },
+};
+
+const ROOM_CAPTIONS: Record<string, string[]> = {
+  "Living Room":    ["Seating area","Feature wall","Dining corner","Evening mood"],
+  "Kitchen":        ["Full kitchen view","Counter & cabinetry","Backsplash detail","Breakfast zone"],
+  "Master Bedroom": ["Bed zone","Wardrobe wall","Dressing area","Bedside detail"],
+  "Bedroom 2":      ["Full room view","Study corner","Wardrobe","Window light"],
+  "Bedroom 3":      ["Full room view","Flexible layout","Storage","Natural light"],
+  "Bathroom":       ["Full bathroom","Vanity detail","Shower area","Fixture close-up"],
+  "Master Bathroom":["Full bathroom","Vanity & mirror","Shower enclosure","Ambiance"],
+  "Common Bathroom":["Full bathroom","Vanity","Fixtures","Tile detail"],
+  "Balcony":        ["Full balcony","Seating area","Planters","Evening view"],
+  "Pooja Room":     ["Full room","Mandir detail","Lighting","Ambiance"],
+};
+
+const OVERALL_PHOTOS: Record<string, string[]> = {
+  Modern:       ["photo-1567767292278-a204e43f6cd1","photo-1556909114-f6e7ad7d3136","photo-1631049307264-da0ec9d70304","photo-1552321554-5fefe8c9ef14"],
+  Contemporary: ["photo-1555041469-a586c61ea9bc","photo-1565183997392-2f6f122e5912","photo-1616594039964-ae9021a400a0","photo-1600607687939-ce8a6c25118c"],
+  Scandinavian: ["photo-1586023492125-27b2c045efd7","photo-1588854337221-4cf9fa96059c","photo-1540304801897-4bd1e5fe2a98","photo-1507652955-f3dcef5a3be5"],
+  Minimal:      ["photo-1449247709967-d4461a6a6103","photo-1556909172-54557c7e4fb7","photo-1505693416388-ac5ce068fe85","photo-1552321554-5fefe8c9ef14"],
+  Industrial:   ["photo-1505409628601-edc9af17fda6","photo-1585515320310-259814833e62","photo-1493809842364-78817add7ffb","photo-1603512500383-b6f84e07e79f"],
+  Classic:      ["photo-1540518614846-7eded433c457","photo-1556909045-9e56fa833e9c","photo-1616594039964-ae9021a400a0","photo-1600566752355-35792bedcfea"],
+};
+
+const OVERALL_CAPTIONS = ["Living spaces","Kitchen & dining","Bedrooms","Bathrooms & details"];
+
+const STYLE_STATEMENTS: Record<string, string> = {
+  Modern:       "Clean geometry, restrained palette — every element earns its place.",
+  Contemporary: "Current trends, timeless comfort — a home that feels of its moment.",
+  Scandinavian: "Warmth, simplicity, and a deep respect for natural materials.",
+  Minimal:      "Silence is a material. Space is the luxury.",
+  Industrial:   "Raw honesty — materials left as they are, spaces left to breathe.",
+  Classic:      "Proportion, craft, and permanence — design that stands apart from fashion.",
+};
+
+function unsplashUrl(id: string, w = 900, h = 600): string {
+  return `https://images.unsplash.com/${id}?auto=format&fit=crop&w=${w}&h=${h}`;
+}
+
 async function moodboardStub(room: RoomDetail, style: StyleProfile): Promise<string> {
-  await delay(800);
+  await delay(300);
+  const ids = (ROOM_PHOTOS[room.name] ?? ROOM_PHOTOS["Living Room"])[style.overallStyle] ?? (ROOM_PHOTOS[room.name] ?? ROOM_PHOTOS["Living Room"])["Modern"];
+  return unsplashUrl(ids[0]);
+}
 
-  // Curated Unsplash photo IDs that actually show good interiors per room + style
-  // Format: unsplash photo ID → landscape crop at 1344x768
-  const roomStyleMap: Record<string, Record<string, string>> = {
-    "Living Room": {
-      Modern:       "photo-1567767292278-a204e43f6cd1", // modern white living room
-      Contemporary: "photo-1555041469-a586c61ea9bc", // contemporary grey sofa
-      Scandinavian: "photo-1586023492125-27b2c045efd7", // scandi living room
-      Minimal:      "photo-1449247709967-d4461a6a6103", // minimal white
-      Industrial:   "photo-1505409628601-edc9af17fda6", // industrial loft
-      Classic:      "photo-1540518614846-7eded433c457", // classic elegant
-    },
-    "Kitchen": {
-      Modern:       "photo-1556909114-f6e7ad7d3136", // modern white kitchen
-      Contemporary: "photo-1565183997392-2f6f122e5912", // contemporary kitchen
-      Scandinavian: "photo-1588854337221-4cf9fa96059c", // scandi kitchen
-      Minimal:      "photo-1556909172-54557c7e4fb7", // minimal kitchen
-      Industrial:   "photo-1585515320310-259814833e62", // industrial kitchen
-      Classic:      "photo-1556909045-9e56fa833e9c", // classic kitchen
-    },
-    "Master Bedroom": {
-      Modern:       "photo-1631049307264-da0ec9d70304", // modern bedroom
-      Contemporary: "photo-1540518614846-7eded433c457", // contemporary bedroom
-      Scandinavian: "photo-1540304801897-4bd1e5fe2a98", // scandi bedroom
-      Minimal:      "photo-1505693416388-ac5ce068fe85", // minimal bedroom
-      Industrial:   "photo-1493809842364-78817add7ffb", // industrial bedroom
-      Classic:      "photo-1616594039964-ae9021a400a0", // classic bedroom
-    },
-    "Bedroom 2": {
-      Modern:       "photo-1588046130717-0eb0c9a3ba15", // modern kids room
-      Contemporary: "photo-1598928506311-c55ded91a20c", // contemporary bedroom
-      Scandinavian: "photo-1615873968403-89e068629265", // scandi bedroom 2
-      Minimal:      "photo-1505691938895-1758d7feb511", // minimal bedroom 2
-      Industrial:   "photo-1583847268964-b28dc8f51f92", // industrial bedroom 2
-      Classic:      "photo-1522771739844-6a9f6d5f14af", // classic bedroom 2
-    },
-    "Bedroom 3": {
-      Modern:       "photo-1560448204-603b3fc33ddc",
-      Contemporary: "photo-1598928506311-c55ded91a20c",
-      Scandinavian: "photo-1615873968403-89e068629265",
-      Minimal:      "photo-1505691938895-1758d7feb511",
-      Industrial:   "photo-1583847268964-b28dc8f51f92",
-      Classic:      "photo-1522771739844-6a9f6d5f14af",
-    },
-    "Bathroom": {
-      Modern:       "photo-1552321554-5fefe8c9ef14", // modern bathroom
-      Contemporary: "photo-1600607687939-ce8a6c25118c", // contemporary bath
-      Scandinavian: "photo-1507652955-f3dcef5a3be5", // scandi bathroom
-      Minimal:      "photo-1552321554-5fefe8c9ef14", // minimal bath
-      Industrial:   "photo-1603512500383-b6f84e07e79f", // industrial bath
-      Classic:      "photo-1600566752355-35792bedcfea", // classic bath
-    },
-    "Master Bathroom": {
-      Modern:       "photo-1552321554-5fefe8c9ef14",
-      Contemporary: "photo-1600607687939-ce8a6c25118c",
-      Scandinavian: "photo-1507652955-f3dcef5a3be5",
-      Minimal:      "photo-1552321554-5fefe8c9ef14",
-      Industrial:   "photo-1603512500383-b6f84e07e79f",
-      Classic:      "photo-1600566752355-35792bedcfea",
-    },
-    "Balcony": {
-      Modern:       "photo-1571026289496-e29ffee09ca3", // modern balcony
-      Contemporary: "photo-1586023492125-27b2c045efd7",
-      Scandinavian: "photo-1583847268964-b28dc8f51f92",
-      Minimal:      "photo-1449247709967-d4461a6a6103",
-      Industrial:   "photo-1505409628601-edc9af17fda6",
-      Classic:      "photo-1540518614846-7eded433c457",
-    },
-    "Pooja Room": {
-      Modern:       "photo-1600607687939-ce8a6c25118c",
-      Contemporary: "photo-1600607687939-ce8a6c25118c",
-      Scandinavian: "photo-1600607687939-ce8a6c25118c",
-      Minimal:      "photo-1600607687939-ce8a6c25118c",
-      Industrial:   "photo-1600607687939-ce8a6c25118c",
-      Classic:      "photo-1600607687939-ce8a6c25118c",
-    },
+async function roomMoodboardStub(room: RoomDetail, style: StyleProfile): Promise<MoodImage[]> {
+  await delay(400);
+  const ids      = (ROOM_PHOTOS[room.name] ?? ROOM_PHOTOS["Living Room"])[style.overallStyle] ?? (ROOM_PHOTOS[room.name] ?? ROOM_PHOTOS["Living Room"])["Modern"];
+  const captions = ROOM_CAPTIONS[room.name] ?? ["Wide view","Detail","Atmosphere","Close-up"];
+  return ids.map((id, i) => ({ url: unsplashUrl(id, i === 0 ? 1200 : 800, i === 0 ? 675 : 600), caption: captions[i] ?? `Image ${i+1}` }));
+}
+
+async function overallMoodboardStub(_rooms: RoomDetail[], style: StyleProfile): Promise<OverallMoodboard> {
+  await delay(500);
+  const ids = OVERALL_PHOTOS[style.overallStyle] ?? OVERALL_PHOTOS["Modern"];
+  return {
+    images: ids.map((id, i) => ({ url: unsplashUrl(id, 900, 600), caption: OVERALL_CAPTIONS[i] ?? `Space ${i+1}` })),
+    styleStatement: STYLE_STATEMENTS[style.overallStyle] ?? "A considered interior designed around your life.",
   };
-
-  // Get the best photo ID for this room + style combination
-  const roomMap = roomStyleMap[room.name] ?? roomStyleMap["Living Room"];
-  const photoId = roomMap[style.overallStyle] ?? roomMap["Modern"];
-
-  // Apply palette variation via Unsplash params
-  const paletteParams: Record<string, string> = {
-    LightAiry:   "&fit=crop&w=1344&h=768&sat=-10&bri=5",
-    NeutralWarm: "&fit=crop&w=1344&h=768&sat=5&warm=10",
-    DarkMoody:   "&fit=crop&w=1344&h=768&sat=10&bri=-10",
-  };
-  const params = paletteParams[style.palette] ?? "&fit=crop&w=1344&h=768";
-
-  return `https://images.unsplash.com/${photoId}?auto=format${params}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -912,24 +960,31 @@ async function loadImageAsBase64(
   imageUrl: string
 ): Promise<{ base64: string; mediaType: "image/png" | "image/jpeg" | "image/webp" } | null> {
   try {
-    // Resolve to disk path
+    // Remote URL (http/https) — includes Vercel Blob URLs
+    if (imageUrl.startsWith("http")) {
+      console.log("[ai] Downloading from URL:", imageUrl);
+      const cleanUrl = imageUrl.split("?")[0];
+      const ext = cleanUrl.split(".").pop()?.toLowerCase() ?? "jpg";
+      const buf = await fetchBuffer(imageUrl);
+      const mediaType = (ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg") as "image/png" | "image/jpeg" | "image/webp";
+      return await shrinkIfNeeded(buf, mediaType);
+    }
+
+    // Local relative path e.g. /uploads/plan-xxx.png
     let diskPath = "";
     if (imageUrl.startsWith("/")) {
       diskPath = path.join(process.cwd(), "public", imageUrl);
-      if (!fs.existsSync(diskPath)) diskPath = imageUrl; // try as-is
+      if (!fs.existsSync(diskPath)) diskPath = imageUrl;
     }
 
     if (!diskPath || !fs.existsSync(diskPath)) {
-      // Remote URL — download first
-      console.log("[ai] Downloading from URL:", imageUrl);
-      const buf = await fetchBuffer(imageUrl);
-      return await shrinkIfNeeded(buf, "image/jpeg");
+      console.error("[ai] Image not found:", imageUrl);
+      return null;
     }
 
     const ext = path.extname(diskPath).toLowerCase();
     console.log(`[ai] Loading image: ${diskPath} (${ext})`);
 
-    // PDF — must rasterise before sending to Gemini
     if (ext === ".pdf") {
       console.log("[ai] PDF detected — rasterising to JPEG");
       return await rasterisePdf(diskPath);
@@ -937,7 +992,7 @@ async function loadImageAsBase64(
 
     const buffer = fs.readFileSync(diskPath);
     console.log(`[ai] Image size: ${(buffer.length / 1024).toFixed(0)} KB`);
-    const mediaType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+    const mediaType = (ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg") as "image/png" | "image/jpeg" | "image/webp";
     return await shrinkIfNeeded(buffer, mediaType);
 
   } catch (err) {
@@ -945,6 +1000,7 @@ async function loadImageAsBase64(
     return null;
   }
 }
+
 
 async function rasterisePdf(
   pdfPath: string
