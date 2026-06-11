@@ -1007,7 +1007,7 @@ async function rasterisePdf(
 ): Promise<{ base64: string; mediaType: "image/jpeg" } | null> {
   try {
     const sharp = (await import("sharp")).default;
-    const buffer = await (sharp as any)(pdfPath, { pages: 1, density: 150 })
+    const buffer = await (sharp as unknown as (input: string, opts: object) => import("sharp").Sharp)(pdfPath, { pages: 1, density: 150 })
       .jpeg({ quality: 90 })
       .toBuffer();
     console.log(`[ai] PDF rasterised: ${(buffer.length / 1024).toFixed(0)} KB`);

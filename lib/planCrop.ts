@@ -1,8 +1,5 @@
 /**
- * lib/planCrop.ts
- *
- * Crops room snippets from the floor plan.
- * Works with both local disk paths and remote Vercel Blob URLs.
+ * lib/planCrop.ts — plan snippet cropping, safe dynamic sharp import
  */
 
 import { saveUploadedFile } from "@/lib/store";
@@ -31,63 +28,61 @@ export async function cropRoomFromPlan(
   roomName: string,
   projectId: string
 ): Promise<string | null> {
-  // Skip PDFs
   if (planImagePath.toLowerCase().endsWith(".pdf")) return null;
 
+  let sharpFn: ((input: Buffer) => import("sharp").Sharp) | null = null;
   try {
-    const sharp = (await import("sharp")).default;
+    const mod = await import("sharp");
+    sharpFn = (mod.default ?? mod) as typeof sharpFn;
+  } catch {
+    return null; // sharp not available — skip cropping
+  }
 
-    // Load image from disk or remote URL
+  try {
     let inputBuffer: Buffer;
     if (planImagePath.startsWith("http")) {
       const res = await fetch(planImagePath);
       if (!res.ok) return null;
       inputBuffer = Buffer.from(await res.arrayBuffer());
     } else {
-      const fs = require("fs") as typeof import("fs");
-      if (!fs.existsSync(planImagePath)) return null;
-      inputBuffer = fs.readFileSync(planImagePath);
+      const { readFileSync, existsSync } = await import("fs");
+      if (!existsSync(planImagePath)) return null;
+      inputBuffer = readFileSync(planImagePath);
     }
 
-    const meta   = await (sharp as unknown as (buf: Buffer) => ReturnType<typeof sharp>)(inputBuffer).metadata();
+    const meta   = await sharpFn!(inputBuffer).metadata();
     const pw     = meta.width  ?? 1000;
     const ph     = meta.height ?? 1000;
+    const zone   = ROOM_ZONES[roomName];
+    const cellW  = 1 / GRID_COLS;
+    const cellH  = 1 / GRID_ROWS;
+    const rawL   = (zone?.col ?? 0) * cellW;
+    const rawT   = (zone?.row ?? 0) * cellH;
+    const rawW   = (zone?.w   ?? 1) * cellW;
+    const rawH   = (zone?.h   ?? 1) * cellH;
 
-    const zone = ROOM_ZONES[roomName];
-    const cellW = 1 / GRID_COLS;
-    const cellH = 1 / GRID_ROWS;
+    const left   = Math.max(0, rawL - PAD);
+    const top    = Math.max(0, rawT - PAD);
+    const right  = Math.min(1, rawL + rawW + PAD);
+    const bot    = Math.min(1, rawT + rawH + PAD);
 
-    const rawLeft = (zone?.col ?? 0) * cellW;
-    const rawTop  = (zone?.row ?? 0) * cellH;
-    const rawW    = (zone?.w  ?? 1) * cellW;
-    const rawH    = (zone?.h  ?? 1) * cellH;
+    const cLeft  = Math.round(left       * pw);
+    const cTop   = Math.round(top        * ph);
+    const cWidth = Math.round((right - left) * pw);
+    const cHeight= Math.round((bot   - top ) * ph);
 
-    const left  = Math.max(0, rawLeft - PAD);
-    const top   = Math.max(0, rawTop  - PAD);
-    const right = Math.min(1, rawLeft + rawW + PAD);
-    const bot   = Math.min(1, rawTop  + rawH + PAD);
+    if (cWidth < 50 || cHeight < 50) return null;
 
-    const cropLeft   = Math.round(left     * pw);
-    const cropTop    = Math.round(top      * ph);
-    const cropWidth  = Math.round((right - left) * pw);
-    const cropHeight = Math.round((bot   - top)  * ph);
-
-    if (cropWidth < 50 || cropHeight < 50) return null;
-
-    const buffer = await (sharp as unknown as (buf: Buffer) => ReturnType<typeof sharp>)(inputBuffer)
-      .extract({ left: cropLeft, top: cropTop, width: cropWidth, height: cropHeight })
-      .normalise()
-      .linear(1.1, -5)
-      .sharpen({ sigma: 0.8 })
+    const buffer = await sharpFn!(inputBuffer)
+      .extract({ left: cLeft, top: cTop, width: cWidth, height: cHeight })
+      .normalise().linear(1.1, -5).sharpen({ sigma: 0.8 })
       .resize(420, null, { withoutEnlargement: false })
       .png({ compressionLevel: 8 })
       .toBuffer();
 
     const slug  = roomName.toLowerCase().replace(/\s+/g, "-");
-    const fname = `snippet-${projectId}-${slug}.png`;
-    const { url } = await saveUploadedFile(buffer, fname);
+    const { url } = await saveUploadedFile(buffer, `snippet-${projectId}-${slug}.png`);
     return url;
-
   } catch (err) {
     console.warn(`[planCrop] Failed for ${roomName}:`, err);
     return null;
