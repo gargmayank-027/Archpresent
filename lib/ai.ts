@@ -452,7 +452,7 @@ export async function regenerateSingleRoomImage(
     }
     const query = buildUnsplashQuery(room.name, style.overallStyle, style.palette, contextPrompt);
     const replacement = await getReplacementPhoto(query, existingUrls);
-    return { ...replacement, caption: caption ?? replacement.caption };
+    return { ...replacement, caption: caption ?? replacement.caption, source: "unsplash" as const };
   }
 
   // mode === "ai"
@@ -486,7 +486,7 @@ export async function generateOverallMoodboard(
       const images: MoodImage[] = [];
       for (const caption of captions) {
         const results = await searchUnsplashPhotos(queries[caption], 1);
-        if (results[0]) images.push({ ...results[0], caption });
+        if (results[0]) images.push({ ...results[0], caption, source: "unsplash" as const });
       }
       if (images.length === captions.length) {
         return { images, styleStatement };
