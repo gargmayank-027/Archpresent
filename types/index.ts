@@ -50,13 +50,7 @@ export interface RoomSummary {
   notes?: string;
 }
 
-export interface PlanAnalysis {
-  rooms: RoomSummary[];
-  hasBalcony?: boolean;
-  hasClearZoning?: boolean;
-  totalAreaSqm?: number;
-  comments?: string[];
-}
+// PlanAnalysis is defined below after RoomDetail (which it references)
 
 export type OverallStyle =
   | "Modern"
