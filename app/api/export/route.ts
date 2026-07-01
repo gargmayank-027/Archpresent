@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     // cached copy — also sidesteps any browser/OS PDF-viewer filename caching.
     const ts = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
 
-    return new NextResponse(pdfBuffer, {
+    return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
