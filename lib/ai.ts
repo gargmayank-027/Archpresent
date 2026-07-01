@@ -614,7 +614,7 @@ async function generateWithPollinations(prompt: string, label: string): Promise<
 async function generateWithReplicate(room: RoomDetail, style: StyleProfile): Promise<string> {
   const prompt = buildMoodboardPrompt(room, style);
 
-  const prediction = await fetchJson<{ urls?: { get?: string }; output?: string[] }>(
+  const prediction = await fetchJson(
     "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
     {
       method: "POST",
@@ -651,7 +651,7 @@ async function pollReplicateAndSave(pollUrl: string, roomName: string, maxAttemp
 // ── DALL-E 3 (paid fallback) ──────────────────────────────────────────────────
 
 async function generateWithDallE(room: RoomDetail, style: StyleProfile): Promise<string> {
-  const response = await fetchJson<{ data?: Array<{ url?: string }> }>("https://api.openai.com/v1/images/generations", {
+  const response = await fetchJson("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
     body: JSON.stringify({
