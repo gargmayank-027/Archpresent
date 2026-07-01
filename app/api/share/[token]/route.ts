@@ -33,7 +33,7 @@ export async function GET(
     }).catch(() => {});
 
     // Strip internal server paths before sending to client
-    const { planImagePath: _p, ...clientProject } = project as Record<string, unknown>;
+    const { planImagePath: _p, ...clientProject } = project as unknown as Record<string, unknown>;
     void _p;
 
     return NextResponse.json({ project: clientProject });
