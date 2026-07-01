@@ -1276,7 +1276,6 @@ function parseStrengthsJson(text: string): string[] {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchJson(url: string, opts: RequestInit = {}): Promise<any> {
   const res = await fetch(url, opts);
   if (!res.ok) {
