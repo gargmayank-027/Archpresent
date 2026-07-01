@@ -36,4 +36,3 @@ next-env.d.ts
 # archpresent data files
 .archpresent-data.json
 /public/uploads/
-.env*

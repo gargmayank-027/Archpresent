@@ -16,8 +16,10 @@ export async function GET(
 ) {
   const project = await projectStore.get(params.id);
   if (!project) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 },
-      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } });
+    return NextResponse.json({ error: "Not found" }, {
+      status: 404,
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
+    });
   }
   return NextResponse.json({ project }, {
     headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
