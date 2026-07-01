@@ -28,7 +28,7 @@ export default function ReviewPage() {
   ];
 
   useEffect(() => {
-    fetch(`/api/projects/${id}`)
+    fetch(`/api/projects/${id}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         setProject(d.project);

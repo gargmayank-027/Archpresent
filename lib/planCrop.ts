@@ -1,33 +1,31 @@
 /**
- * lib/planCrop.ts — plan snippet cropping, safe dynamic sharp import
+ * lib/planCrop.ts — plan snippet cropping
+ *
+ * IMPORTANT: We do NOT guess room locations using a fixed grid anymore.
+ * A hardcoded "Bedroom 2 is probably top-right" heuristic produced wrong
+ * crops most of the time, which actively misleads the architect.
+ *
+ * Behaviour now:
+ *   - If room.boundingBox is present (real coordinates from a future
+ *     vision-based room-detection pass), crop precisely using it.
+ *   - Otherwise, return null. The caller falls back to showing the full
+ *     uncropped plan image, which is honest even if less specific.
  */
 
 import { saveUploadedFile } from "@/lib/store";
+import type { RoomBoundingBox } from "@/types";
 
-const ROOM_ZONES: Record<string, { col: number; row: number; w: number; h: number }> = {
-  "Living Room":     { col: 0, row: 0, w: 2, h: 1 },
-  "Dining":          { col: 0, row: 1, w: 1, h: 1 },
-  "Kitchen":         { col: 0, row: 2, w: 1, h: 1 },
-  "Master Bedroom":  { col: 2, row: 0, w: 1, h: 1 },
-  "Bedroom 2":       { col: 2, row: 1, w: 1, h: 1 },
-  "Bedroom 3":       { col: 2, row: 2, w: 1, h: 1 },
-  "Bedroom 4":       { col: 1, row: 2, w: 1, h: 1 },
-  "Bathroom":        { col: 1, row: 1, w: 1, h: 1 },
-  "Master Bathroom": { col: 2, row: 0, w: 1, h: 1 },
-  "Common Bathroom": { col: 1, row: 1, w: 1, h: 1 },
-  "Balcony":         { col: 0, row: 0, w: 1, h: 1 },
-  "Pooja Room":      { col: 1, row: 0, w: 1, h: 1 },
-};
-
-const GRID_COLS = 3;
-const GRID_ROWS = 3;
-const PAD       = 0.08;
+const PAD = 0.04; // 4% padding around a known bounding box for context
 
 export async function cropRoomFromPlan(
   planImagePath: string,
   roomName: string,
-  projectId: string
+  projectId: string,
+  boundingBox?: RoomBoundingBox
 ): Promise<string | null> {
+  // No real coordinates known — don't guess. Caller shows full plan instead.
+  if (!boundingBox) return null;
+
   if (planImagePath.toLowerCase().endsWith(".pdf")) return null;
 
   let sharpFn: ((input: Buffer) => import("sharp").Sharp) | null = null;
@@ -50,26 +48,19 @@ export async function cropRoomFromPlan(
       inputBuffer = readFileSync(planImagePath);
     }
 
-    const meta   = await sharpFn!(inputBuffer).metadata();
-    const pw     = meta.width  ?? 1000;
-    const ph     = meta.height ?? 1000;
-    const zone   = ROOM_ZONES[roomName];
-    const cellW  = 1 / GRID_COLS;
-    const cellH  = 1 / GRID_ROWS;
-    const rawL   = (zone?.col ?? 0) * cellW;
-    const rawT   = (zone?.row ?? 0) * cellH;
-    const rawW   = (zone?.w   ?? 1) * cellW;
-    const rawH   = (zone?.h   ?? 1) * cellH;
+    const meta = await sharpFn!(inputBuffer).metadata();
+    const pw   = meta.width  ?? 1000;
+    const ph   = meta.height ?? 1000;
 
-    const left   = Math.max(0, rawL - PAD);
-    const top    = Math.max(0, rawT - PAD);
-    const right  = Math.min(1, rawL + rawW + PAD);
-    const bot    = Math.min(1, rawT + rawH + PAD);
+    const left = Math.max(0, boundingBox.x - PAD);
+    const top  = Math.max(0, boundingBox.y - PAD);
+    const right = Math.min(1, boundingBox.x + boundingBox.width  + PAD);
+    const bot   = Math.min(1, boundingBox.y + boundingBox.height + PAD);
 
-    const cLeft  = Math.round(left       * pw);
-    const cTop   = Math.round(top        * ph);
-    const cWidth = Math.round((right - left) * pw);
-    const cHeight= Math.round((bot   - top ) * ph);
+    const cLeft   = Math.round(left  * pw);
+    const cTop    = Math.round(top   * ph);
+    const cWidth  = Math.round((right - left) * pw);
+    const cHeight = Math.round((bot   - top ) * ph);
 
     if (cWidth < 50 || cHeight < 50) return null;
 

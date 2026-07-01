@@ -32,12 +32,18 @@ export async function POST(req: NextRequest) {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
 
+    // Timestamp the filename so re-exports are never mistaken for a stale
+    // cached copy — also sidesteps any browser/OS PDF-viewer filename caching.
+    const ts = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
+
     return new NextResponse(pdfBuffer, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${slug}-concept.pdf"`,
+        "Content-Disposition": `attachment; filename="${slug}-concept-${ts}.pdf"`,
         "Content-Length": String(pdfBuffer.byteLength),
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
       },
     });
   } catch (err) {

@@ -3,11 +3,12 @@
 import { useEffect, useState } from "react";
 
 interface ProviderStatus {
-  gemini:    "ok" | "missing";
-  hf:        "ok" | "missing";
-  anthropic: "ok" | "missing";
-  openai:    "ok" | "missing";
-  replicate: "ok" | "missing";
+  gemini:       "ok" | "missing";
+  unsplash:     "ok" | "missing";
+  pollinations: "ok" | "unkeyed";
+  anthropic:    "ok" | "missing";
+  openai:       "ok" | "missing";
+  replicate:    "ok" | "missing";
 }
 
 export default function SetupPage() {
@@ -28,11 +29,13 @@ export default function SetupPage() {
         </p>
         <h1 className="font-display text-4xl font-light text-stone-900 mb-3"
             style={{ fontFamily: "'Cormorant Garamond', serif" }}>
-          Two free keys,<br />full AI features.
+          Two free keys,<br />real moodboards.
         </h1>
         <p className="text-stone-500 text-sm leading-relaxed">
-          ArchPresent uses two free AI APIs. Setup takes about 3 minutes.
-          No credit card required for either.
+          First-draft moodboards use real, sourceable interior photography (the Pinterest-style
+          workflow most firms already use) via a free Unsplash key. A free Gemini key powers
+          plan analysis. AI generation (Pollinations) works with no setup at all, for whenever
+          you want a more conceptual alternative to a real photo.
         </p>
       </div>
 
@@ -41,18 +44,39 @@ export default function SetupPage() {
         <div className="card p-5 mb-8 space-y-3 fade-up fade-up-2">
           <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">Current Status</p>
           <div className="grid grid-cols-2 gap-2">
-            <StatusRow label="Gemini Flash (analysis)" ok={status.gemini === "ok"} free />
-            <StatusRow label="Hugging Face (images)"   ok={status.hf === "ok"}      free />
-            <StatusRow label="Claude (analysis)"       ok={status.anthropic === "ok"} />
-            <StatusRow label="GPT-4o (analysis)"       ok={status.openai === "ok"} />
-            <StatusRow label="Replicate (images)"      ok={status.replicate === "ok"} />
+            <StatusRow label="Gemini Flash (analysis)"     ok={status.gemini === "ok"}       free />
+            <StatusRow label="Unsplash (real photos)"      ok={status.unsplash === "ok"}     free />
+            <StatusRow label="Pollinations.ai (AI images)" ok={status.pollinations === "ok"} free
+              hint={status.pollinations === "unkeyed" ? "working, unkeyed" : undefined} />
+            <StatusRow label="Claude (analysis)"           ok={status.anthropic === "ok"} />
+            <StatusRow label="GPT-4o (analysis)"           ok={status.openai === "ok"} />
+            <StatusRow label="Replicate (images)"          ok={status.replicate === "ok"} />
           </div>
         </div>
       )}
 
-      {/* Step 1 — Gemini */}
+      {/* Step 1 — Unsplash (real photo first drafts) */}
       <SetupStep
         num="01"
+        title="Unsplash — Real Photo Moodboards"
+        badge="Free · 50 req/hour"
+        badgeColor="bg-green-100 text-green-700"
+        steps={[
+          { label: "Go to", link: { text: "unsplash.com/developers", url: "https://unsplash.com/developers" } },
+          { label: "Sign up / log in, click \"New Application\"" },
+          { label: "Accept the API guidelines" },
+          { label: 'Name it "ArchPresent", give a one-line description' },
+          { label: "Copy the Access Key (not the Secret Key)" },
+          { label: 'Add to your .env.local file:', code: "UNSPLASH_ACCESS_KEY=..." },
+          { label: "Restart the dev server: npm run dev" },
+        ]}
+        what="Finds real, photographer-credited interior photos matched to each room's style and your plain-English brief — the same first-draft workflow most firms already do on Pinterest, except sourced from an API that's actually free and legal to use."
+        note="50 requests/hour on the free tier. Each room load uses one request; results are cached for 5 minutes. Without this key, the app generates AI images instead of real photos as the first draft."
+      />
+
+      {/* Step 2 — Gemini */}
+      <SetupStep
+        num="02"
         title="Google Gemini Flash — Plan Analysis"
         badge="Free · 1,500 req/day"
         badgeColor="bg-green-100 text-green-700"
@@ -66,24 +90,40 @@ export default function SetupPage() {
         what="Analyses your floor plan image — identifies all rooms, estimates sizes, detects orientation and natural light, finds special features like attached bathrooms and island counters."
       />
 
-      {/* Step 2 — Hugging Face */}
-      <SetupStep
-        num="02"
-        title="Hugging Face — Interior Moodboards"
-        badge="Free · generous limits"
-        badgeColor="bg-green-100 text-green-700"
-        steps={[
-          { label: "Go to", link: { text: "huggingface.co", url: "https://huggingface.co/join" } },
-          { label: "Create a free account" },
-          { label: "Go to Settings → Access Tokens → New token" },
-          { label: 'Name it "archpresent", set role to "read"' },
-          { label: "Copy the token (starts with hf_…)" },
-          { label: 'Add to your .env.local file:', code: "HF_TOKEN=hf_..." },
-          { label: "Restart the dev server: npm run dev" },
-        ]}
-        what="Generates photorealistic interior moodboard images using FLUX.1-schnell. Each image is specific to the room size, orientation, natural light, and your style choices."
-        note="First image may take 20–40 seconds while the AI model loads. Subsequent images are faster. This is normal for the free tier."
-      />
+      {/* Step 3 — Pollinations (works without a key, better with one) */}
+      <div className="card p-6 space-y-4 mb-5 fade-up fade-up-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="font-mono text-xl text-stone-200 leading-none">03</span>
+            <div>
+              <p className="font-mono text-xs uppercase tracking-widest text-stone-700">
+                Pollinations.ai — AI-Generated Alternative
+              </p>
+              <p className="text-xs text-stone-400 mt-1 leading-relaxed">
+                Click "✨ Generate with AI" on any moodboard image to swap a real photo for an
+                AI-generated concept — useful when you want something more conceptual or specific
+                than what exists in stock photography.
+              </p>
+            </div>
+          </div>
+          <span className="font-mono text-[9px] uppercase tracking-widest px-2 py-1 rounded-sm flex-shrink-0 bg-green-100 text-green-700">
+            Free
+          </span>
+        </div>
+        <div className="border-t border-stone-100 pt-4 space-y-2.5">
+          <p className="text-sm text-stone-600 leading-relaxed">
+            Works automatically with no setup. For best reliability, add a free key
+            (recommended — avoids "queue full" errors during busy periods):
+          </p>
+          <ol className="text-xs text-stone-500 leading-relaxed list-decimal list-inside space-y-0.5">
+            <li>Go to <a href="https://enter.pollinations.ai" target="_blank" rel="noreferrer" className="underline font-medium text-stone-700">enter.pollinations.ai</a></li>
+            <li>Sign in with GitHub (free, no credit card)</li>
+            <li>Create a key, copy it</li>
+            <li>Add to .env.local: <code className="bg-stone-100 px-1.5 py-0.5 rounded">POLLINATIONS_API_KEY=pk_...</code></li>
+            <li>Restart: <code className="bg-stone-100 px-1.5 py-0.5 rounded">npm run dev</code></li>
+          </ol>
+        </div>
+      </div>
 
       {/* .env.local sample */}
       <div className="card p-6 space-y-4 fade-up fade-up-4 mb-8">
@@ -95,9 +135,10 @@ export default function SetupPage() {
         <pre className="bg-stone-900 text-stone-100 rounded-sm p-4 text-xs font-mono leading-relaxed overflow-x-auto">
 {`APP_URL=http://localhost:3000
 
-# Free — required for AI features
+# Free — required for plan analysis
 GOOGLE_AI_KEY=AIzaSy...
-HF_TOKEN=hf_...
+
+# Moodboard images need no key at all — Pollinations.ai is always on
 
 ENABLE_PLAN_ENHANCEMENT=true`}
         </pre>
@@ -132,17 +173,18 @@ ENABLE_PLAN_ENHANCEMENT=true`}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function StatusRow({ label, ok, free }: { label: string; ok: boolean; free?: boolean }) {
+function StatusRow({ label, ok, free, hint }: { label: string; ok: boolean; free?: boolean; hint?: string }) {
   return (
     <div className="flex items-center gap-2">
       <span className={`w-4 h-4 rounded-sm border flex items-center justify-center text-[9px] flex-shrink-0 ${
-        ok ? "border-green-500 bg-green-50 text-green-600" : "border-stone-200 text-stone-300"
+        ok ? "border-green-500 bg-green-50 text-green-600" : hint ? "border-amber-400 bg-amber-50 text-amber-600" : "border-stone-200 text-stone-300"
       }`}>
-        {ok ? "✓" : "·"}
+        {ok ? "✓" : hint ? "~" : "·"}
       </span>
       <span className="text-xs text-stone-600 flex-1">{label}</span>
       {free && <span className="font-mono text-[9px] text-green-600 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded-sm">FREE</span>}
-      {!ok && <span className="font-mono text-[9px] text-stone-300">not set</span>}
+      {hint && <span className="font-mono text-[9px] text-amber-500">{hint}</span>}
+      {!ok && !hint && <span className="font-mono text-[9px] text-stone-300">not set</span>}
     </div>
   );
 }

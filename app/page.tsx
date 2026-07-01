@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Project, FirmProfile } from "@/types";
+import { ProjectCardMenu } from "@/components/ProjectCardMenu";
 
 export default function HomePage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -12,7 +13,7 @@ export default function HomePage() {
 
   useEffect(() => {
     Promise.all([
-      fetch("/api/projects").then((r) => r.json()),
+      fetch("/api/projects", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/firm").then((r) => r.json()),
     ]).then(([pd, fd]) => {
       setProjects(pd.projects ?? []);
@@ -146,7 +147,12 @@ export default function HomePage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((project, i) => (
-              <ProjectCard key={project.id} project={project} delay={i} />
+              <ProjectCard
+                key={project.id}
+                project={project}
+                delay={i}
+                onDeleted={(id) => setProjects((prev) => prev.filter((p) => p.id !== id))}
+              />
             ))}
           </div>
         )}
@@ -181,7 +187,15 @@ export default function HomePage() {
 
 // ─── Project card ─────────────────────────────────────────────────────────────
 
-function ProjectCard({ project, delay }: { project: Project; delay: number }) {
+function ProjectCard({
+  project,
+  delay,
+  onDeleted,
+}: {
+  project: Project;
+  delay: number;
+  onDeleted: (id: string) => void;
+}) {
   const STATUS_LABEL: Record<string, string> = {
     created:  "Uploaded",
     analyzed: "Analysed",
@@ -209,7 +223,7 @@ function ProjectCard({ project, delay }: { project: Project; delay: number }) {
 
   return (
     <Link href={nextStep(project.status)}
-      className="card overflow-hidden group hover:border-stone-400 transition-all hover:shadow-sm fade-up"
+      className="card overflow-hidden group hover:border-stone-400 transition-all hover:shadow-sm fade-up relative"
       style={{ animationDelay: `${0.04 + delay * 0.05}s`, opacity: 0 }}>
 
       {/* Plan thumbnail */}
@@ -229,12 +243,20 @@ function ProjectCard({ project, delay }: { project: Project; delay: number }) {
             ))}
           </div>
         )}
+
+        {/* Live share indicator */}
+        {project.shareToken && project.shareEnabled && (
+          <span className="absolute top-2 left-2 flex items-center gap-1 bg-white/90 backdrop-blur-sm px-1.5 py-0.5 rounded-sm">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+            <span className="font-mono text-[8px] text-stone-500 uppercase tracking-wider">Live</span>
+          </span>
+        )}
       </div>
 
       {/* Card body */}
       <div className="p-4">
         <div className="flex items-start justify-between gap-2 mb-2">
-          <h3 className="text-sm font-medium text-stone-900 group-hover:text-stone-700 transition-colors leading-snug">
+          <h3 className="text-sm font-medium text-stone-900 group-hover:text-stone-700 transition-colors leading-snug min-w-0 truncate">
             {project.name}
           </h3>
           <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
@@ -242,6 +264,7 @@ function ProjectCard({ project, delay }: { project: Project; delay: number }) {
             <span className="font-mono text-[9px] tracking-widest uppercase text-stone-400">
               {STATUS_LABEL[project.status]}
             </span>
+            <ProjectCardMenu project={project} onDeleted={onDeleted} />
           </div>
         </div>
 

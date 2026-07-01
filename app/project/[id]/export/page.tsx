@@ -15,6 +15,14 @@ export default function ExportPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
 
+  // Share link state
+  const [shareUrl,     setShareUrl]     = useState<string | null>(null);
+  const [shareExpiry,  setShareExpiry]  = useState("never");
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareCopied,  setShareCopied]  = useState(false);
+  const [shareEnabled, setShareEnabled] = useState(false);
+  const [shareViews,   setShareViews]   = useState(0);
+
   const STEPS = [
     { num: "1", label: "Upload",     status: "complete" as const },
     { num: "2", label: "Review",     status: "complete" as const },
@@ -22,12 +30,75 @@ export default function ExportPage() {
     { num: "4", label: "Export",     status: "active"   as const },
   ];
 
-  useEffect(() => {
-    fetch(`/api/projects/${id}`)
+  function loadProject() {
+    // cache: "no-store" forces a fresh fetch every time — prevents the
+    // browser / Next.js fetch cache from serving stale project data after
+    // edits made on the Moodboards or Review pages.
+    fetch(`/api/projects/${id}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => { setProject(d.project); setLoading(false); })
+      .then((d) => {
+        setProject(d.project);
+        if (d.project.shareToken && d.project.shareEnabled !== false) {
+          setShareUrl(`${window.location.origin}/share/${d.project.shareToken}`);
+          setShareEnabled(true);
+        }
+        setShareViews(d.project.shareViewCount ?? 0);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    loadProject();
+    // Re-fetch whenever the tab/window regains focus — covers the common
+    // case of editing moodboards in another tab, or coming back via
+    // browser back/forward (bfcache) where this effect wouldn't re-run.
+    function onFocus() { loadProject(); }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // ── Share link functions ────────────────────────────────────────────────
+  async function generateShareLink() {
+    setShareLoading(true);
+    try {
+      const res  = await fetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id, expiresIn: shareExpiry }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed");
+      setShareUrl(data.shareUrl);
+      setShareEnabled(true);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Failed to generate link");
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  async function disableShareLink() {
+    setShareLoading(true);
+    try {
+      await fetch("/api/share", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id }),
+      });
+      setShareEnabled(false);
+    } catch { setExportError("Failed to disable link"); }
+    finally { setShareLoading(false); }
+  }
+
+  function copyLink() {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2500);
+    });
+  }
 
   async function handleExport() {
     setExporting(true);
@@ -236,6 +307,100 @@ export default function ExportPage() {
         ))}
       </div>
 
+      {/* ── Share link panel ─────────────────────────────────────────────── */}
+      <div className="mt-6 card overflow-hidden fade-up fade-up-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full flex-shrink-0 transition-colors ${shareEnabled && shareUrl ? "bg-green-400" : "bg-stone-300"}`} />
+            <div>
+              <p className="font-mono text-xs uppercase tracking-widest text-stone-700">Client Presentation Link</p>
+              <p className="text-xs text-stone-400 mt-0.5">Live browser presentation — no PDF download needed</p>
+            </div>
+          </div>
+          {shareViews > 0 && (
+            <span className="font-mono text-[10px] text-stone-400 bg-stone-100 px-2 py-1 rounded-sm">
+              {shareViews} {shareViews === 1 ? "view" : "views"}
+            </span>
+          )}
+        </div>
+
+        <div className="px-6 py-5 space-y-4">
+          {!shareUrl ? (
+            /* Not yet generated */
+            <div className="flex items-end gap-4 flex-wrap">
+              <div className="space-y-1">
+                <label className="field-label">Link expiry</label>
+                <select className="field-input w-44" value={shareExpiry} onChange={(e) => setShareExpiry(e.target.value)}>
+                  <option value="never">Never expires</option>
+                  <option value="30d">30 days</option>
+                  <option value="7d">7 days</option>
+                </select>
+              </div>
+              <button onClick={generateShareLink} disabled={shareLoading || !isReady} className="btn-primary">
+                {shareLoading
+                  ? <><span className="spinner" /><span>Generating…</span></>
+                  : <><LinkIcon /><span>Generate Share Link</span></>}
+              </button>
+              {!isReady && <p className="text-xs text-stone-400 self-end pb-2">Complete plan analysis first.</p>}
+            </div>
+          ) : (
+            /* Link generated */
+            <div className="space-y-3">
+              {/* URL bar + action buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className={`flex-1 flex items-center gap-2 border rounded-sm px-3 py-2.5 min-w-0 ${shareEnabled ? "border-stone-200 bg-stone-50" : "border-stone-100 bg-stone-50 opacity-50"}`}>
+                  <LinkIcon className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
+                  <span className="font-mono text-xs text-stone-600 truncate">{shareUrl}</span>
+                </div>
+                <button onClick={copyLink} disabled={!shareEnabled} className="btn-secondary flex-shrink-0">
+                  {shareCopied ? <><CheckIcon /><span>Copied!</span></> : <><CopyIcon /><span>Copy</span></>}
+                </button>
+                <a href={shareEnabled ? shareUrl : "#"} target="_blank" rel="noreferrer"
+                  className={`btn-secondary flex-shrink-0 ${!shareEnabled ? "pointer-events-none opacity-40" : ""}`}>
+                  <ExternalIcon /><span>Preview</span>
+                </a>
+              </div>
+
+              {/* Toggle + expiry */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <button type="button"
+                      onClick={shareEnabled ? disableShareLink : generateShareLink}
+                      disabled={shareLoading}
+                      className={`w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${shareEnabled ? "bg-stone-800" : "bg-stone-200"}`}
+                      role="switch" aria-checked={shareEnabled}>
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${shareEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                    </button>
+                    <span className="text-xs text-stone-500">{shareEnabled ? "Active" : "Disabled"}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-stone-400">Expiry:</span>
+                    <select className="font-mono text-[10px] text-stone-500 bg-transparent border border-stone-200 rounded-sm px-2 py-1"
+                      value={shareExpiry} onChange={(e) => setShareExpiry(e.target.value)}>
+                      <option value="never">Never</option>
+                      <option value="30d">30 days</option>
+                      <option value="7d">7 days</option>
+                    </select>
+                  </div>
+                </div>
+                <button onClick={generateShareLink} disabled={shareLoading} className="btn-ghost text-[10px]">
+                  {shareLoading ? "Updating…" : "↻ Refresh link"}
+                </button>
+              </div>
+
+              {/* Hint */}
+              <div className="bg-stone-50 border border-stone-100 rounded-sm px-4 py-3">
+                <p className="text-xs text-stone-500 leading-relaxed">
+                  <strong className="text-stone-700">Send this link to your client.</strong>{" "}
+                  Opens in any browser — no app or login needed. Full 16:9 presentation with keyboard and click navigation.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* ── Export footer ────────────────────────────────────────────────── */}
       <div className="mt-8 flex items-center justify-between pt-6 border-t border-stone-200 fade-up fade-up-4">
         <div className="space-y-0.5">
@@ -376,11 +541,8 @@ function SlideThumbnail({ slide, project }: { slide: SlidePreview; project: Proj
       <div className="w-full h-full bg-[#f7f5f2] flex gap-0.5 p-0.5">
         {/* Plan snippet */}
         <div className="w-[28%] bg-white flex items-center justify-center overflow-hidden">
-          {slide.planSnippetUrl ? (
-            <img src={slide.planSnippetUrl} alt="plan" className="w-full h-full object-contain" style={{imageRendering:"crisp-edges"}} />
-          ) : (
-            <span className="font-mono text-[4px] text-stone-300 uppercase">Plan</span>
-          )}
+          <img src={slide.planSnippetUrl ?? project.planImageUrl} alt="plan"
+            className="w-full h-full object-contain" style={{imageRendering:"crisp-edges"}} />
         </div>
         {/* Mood images */}
         <div className="flex-1 grid grid-cols-3 gap-0.5">
@@ -629,16 +791,12 @@ function SlidePreviewLarge({ slide, project }: { slide: SlidePreview; project: P
             )}
           </div>
           {/* Plan snippet */}
-          <div className="flex-1 flex items-center justify-center bg-stone-50 rounded-sm overflow-hidden">
-            {slide.planSnippetUrl ? (
-              <img src={slide.planSnippetUrl} alt="plan snippet"
-                className="max-w-full max-h-full object-contain"
-                style={{ imageRendering: "crisp-edges" }} />
-            ) : (
-              <div className="text-center">
-                <p className="font-mono text-[9px] text-stone-300 uppercase">Plan snippet</p>
-                <p className="font-mono text-[8px] text-stone-200">unavailable</p>
-              </div>
+          <div className="flex-1 flex flex-col items-center justify-center bg-stone-50 rounded-sm overflow-hidden">
+            <img src={slide.planSnippetUrl ?? project.planImageUrl} alt={slide.planSnippetUrl ? "plan snippet" : "full plan"}
+              className="max-w-full max-h-full object-contain"
+              style={{ imageRendering: "crisp-edges" }} />
+            {!slide.planSnippetUrl && (
+              <p className="font-mono text-[8px] text-stone-300 uppercase mt-1">Full plan</p>
             )}
           </div>
           {/* Special features */}
@@ -778,6 +936,41 @@ function DownloadIcon() {
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
         d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+    </svg>
+  );
+}
+
+function LinkIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+        d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+    </svg>
+  );
+}
+
+function CopyIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+function ExternalIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+        d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
     </svg>
   );
 }

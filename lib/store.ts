@@ -1,22 +1,23 @@
 /**
  * lib/store.ts
  *
- * Storage adapter with two implementations that switch automatically:
+ * Storage adapter — switches automatically between environments:
  *
- *   PRODUCTION (Vercel): uses Vercel KV (Redis) for project/firm data
- *                        uses Vercel Blob for file uploads
+ *   PRODUCTION (Vercel): Vercel Blob for EVERYTHING
+ *     - File uploads (plan images, logos, moodboards) → uploaded as blobs
+ *     - Project data → stored as JSON blobs at "data/project-{id}.json"
+ *     - Firm profile → stored as a JSON blob at "data/firm.json"
+ *     - No Redis/KV needed — Blob is the only Vercel storage required
  *
- *   DEVELOPMENT (local): uses in-memory Map + JSON sidecar files
- *                        uses local /public/uploads directory
+ *   DEVELOPMENT (local): in-memory Map + JSON sidecar files + /public/uploads
  *
- * Detection: if BLOB_READ_WRITE_TOKEN is set → Vercel mode.
- *            Otherwise → local mode.
+ * Detection: BLOB_READ_WRITE_TOKEN present → Vercel/Blob mode.
  *
- * To set up Vercel storage:
- *   1. vercel link (link your project)
- *   2. vercel storage create kv   → adds KV_URL etc to env
- *   3. vercel storage create blob → adds BLOB_READ_WRITE_TOKEN to env
- *   4. vercel env pull .env.local → pulls them to local
+ * Blob-as-database tradeoffs:
+ *   - list() fetches all project blobs — fine for dozens of projects,
+ *     not ideal for thousands. For an architecture firm tool this is fine.
+ *   - No transactions — concurrent edits are last-write-wins.
+ *   - Very simple, zero extra services, genuinely free on Vercel's Hobby plan.
  */
 
 import type { Project, ProjectStore, FirmProfile, FirmStore } from "@/types";
@@ -29,20 +30,24 @@ const IS_VERCEL = !!process.env.BLOB_READ_WRITE_TOKEN;
 
 export const projectStore: ProjectStore = {
   async create(project) {
-    if (IS_VERCEL) return kv_projectCreate(project);
+    if (IS_VERCEL) return blob_projectCreate(project);
     return local_projectCreate(project);
   },
   async get(id) {
-    if (IS_VERCEL) return kv_projectGet(id);
+    if (IS_VERCEL) return blob_projectGet(id);
     return local_projectGet(id);
   },
   async update(id, patch) {
-    if (IS_VERCEL) return kv_projectUpdate(id, patch);
+    if (IS_VERCEL) return blob_projectUpdate(id, patch);
     return local_projectUpdate(id, patch);
   },
   async list() {
-    if (IS_VERCEL) return kv_projectList();
+    if (IS_VERCEL) return blob_projectList();
     return local_projectList();
+  },
+  async delete(id) {
+    if (IS_VERCEL) return blob_projectDelete(id);
+    return local_projectDelete(id);
   },
 };
 
@@ -52,11 +57,11 @@ export const projectStore: ProjectStore = {
 
 export const firmStore: FirmStore = {
   async get() {
-    if (IS_VERCEL) return kv_firmGet();
+    if (IS_VERCEL) return blob_firmGet();
     return local_firmGet();
   },
   async set(profile) {
-    if (IS_VERCEL) return kv_firmSet(profile);
+    if (IS_VERCEL) return blob_firmSet(profile);
     return local_firmSet(profile);
   },
 };
@@ -74,7 +79,7 @@ export async function saveUploadedFile(
 }
 
 export function ensureUploadDir() {
-  if (IS_VERCEL) return; // no-op on Vercel
+  if (IS_VERCEL) return;
   const { mkdirSync, existsSync } = require("fs") as typeof import("fs");
   const { join } = require("path") as typeof import("path");
   const dir = join(process.cwd(), "public", "uploads");
@@ -82,73 +87,123 @@ export function ensureUploadDir() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VERCEL KV IMPLEMENTATION
+// VERCEL BLOB IMPLEMENTATION (data + files)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function getKV() {
-  const { kv } = await import("@vercel/kv");
-  return kv;
+async function getBlob() {
+  return await import("@vercel/blob");
 }
 
-async function kv_projectCreate(project: Project): Promise<Project> {
-  const kv = await getKV();
-  await kv.set(`project:${project.id}`, project);
-  // Add to index sorted by createdAt
-  await kv.zadd("projects:index", {
-    score: new Date(project.createdAt).getTime(),
-    member: project.id,
+// ── Project data stored as JSON blobs ──────────────────────────────────────
+
+const projectKey = (id: string) => `data/project-${id}.json`;
+const PROJECT_PREFIX = "data/project-";
+
+async function blob_projectCreate(project: Project): Promise<Project> {
+  const { put } = await getBlob();
+  const json = JSON.stringify(project);
+  await put(projectKey(project.id), json, {
+    access: "public",
+    contentType: "application/json",
+    addRandomSuffix: false,
   });
   return project;
 }
 
-async function kv_projectGet(id: string): Promise<Project | null> {
-  const kv = await getKV();
-  return (await kv.get<Project>(`project:${id}`)) ?? null;
+async function blob_projectGet(id: string): Promise<Project | null> {
+  try {
+    const { list } = await getBlob();
+    const { blobs } = await list({ prefix: projectKey(id) });
+    if (!blobs.length) return null;
+    const res = await fetch(blobs[0].url, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as Project;
+  } catch {
+    return null;
+  }
 }
 
-async function kv_projectUpdate(id: string, patch: Partial<Project>): Promise<Project> {
-  const kv      = await getKV();
-  const existing = await kv.get<Project>(`project:${id}`);
+async function blob_projectUpdate(id: string, patch: Partial<Project>): Promise<Project> {
+  const existing = await blob_projectGet(id);
   if (!existing) throw new Error(`Project ${id} not found`);
   const updated = { ...existing, ...patch };
-  await kv.set(`project:${id}`, updated);
+  await blob_projectCreate(updated); // overwrite — same key, addRandomSuffix: false
   return updated;
 }
 
-async function kv_projectList(): Promise<Project[]> {
-  const kv  = await getKV();
-  // Get IDs sorted by score desc (newest first)
-  const ids = await kv.zrange("projects:index", 0, -1, { rev: true }) as string[];
-  if (!ids.length) return [];
-  const projects = await Promise.all(ids.map((id) => kv.get<Project>(`project:${id}`)));
-  return projects.filter((p): p is Project => !!p);
+async function blob_projectList(): Promise<Project[]> {
+  try {
+    const { list } = await getBlob();
+    const { blobs } = await list({ prefix: PROJECT_PREFIX });
+    if (!blobs.length) return [];
+
+    const projects = await Promise.all(
+      blobs.map(async (blob) => {
+        try {
+          const res = await fetch(blob.url, { cache: "no-store" });
+          if (!res.ok) return null;
+          return (await res.json()) as Project;
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    return (projects.filter(Boolean) as Project[]).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  } catch {
+    return [];
+  }
 }
 
-async function kv_firmGet(): Promise<FirmProfile | null> {
-  const kv = await getKV();
-  return (await kv.get<FirmProfile>("firm:profile")) ?? null;
+async function blob_projectDelete(id: string): Promise<void> {
+  const { list, del } = await getBlob();
+  const { blobs } = await list({ prefix: projectKey(id) });
+  if (blobs.length) {
+    await del(blobs.map((b) => b.url));
+  }
 }
 
-async function kv_firmSet(profile: FirmProfile): Promise<FirmProfile> {
-  const kv = await getKV();
-  await kv.set("firm:profile", profile);
+// ── Firm profile stored as a single JSON blob ──────────────────────────────
+
+const FIRM_KEY = "data/firm.json";
+
+async function blob_firmGet(): Promise<FirmProfile | null> {
+  try {
+    const { list } = await getBlob();
+    const { blobs } = await list({ prefix: FIRM_KEY });
+    if (!blobs.length) return null;
+    const res = await fetch(blobs[0].url, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as FirmProfile;
+  } catch {
+    return null;
+  }
+}
+
+async function blob_firmSet(profile: FirmProfile): Promise<FirmProfile> {
+  const { put } = await getBlob();
+  await put(FIRM_KEY, JSON.stringify(profile), {
+    access: "public",
+    contentType: "application/json",
+    addRandomSuffix: false,
+  });
   return profile;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// VERCEL BLOB IMPLEMENTATION
-// ─────────────────────────────────────────────────────────────────────────────
+// ── File uploads ──────────────────────────────────────────────────────────
 
 async function blob_saveFile(
   buffer: Buffer,
   filename: string
 ): Promise<{ url: string; diskPath: string }> {
-  const { put } = await import("@vercel/blob");
+  const { put } = await getBlob();
   const blob = await put(`uploads/${filename}`, buffer, {
     access: "public",
     contentType: getContentType(filename),
+    addRandomSuffix: false,
   });
-  // diskPath is the blob URL on Vercel (used by pdf.ts for image loading)
   return { url: blob.url, diskPath: blob.url };
 }
 
@@ -157,15 +212,15 @@ function getContentType(filename: string): string {
   const map: Record<string, string> = {
     png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
     webp: "image/webp", svg: "image/svg+xml", pdf: "application/pdf",
+    json: "application/json",
   };
   return map[ext] ?? "application/octet-stream";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LOCAL IMPLEMENTATION (development)
+// LOCAL IMPLEMENTATION (development — in-memory + JSON files + /public/uploads)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Lazy imports so fs/path are only loaded in Node (not Edge runtime)
 function getFs() { return require("fs") as typeof import("fs"); }
 function getPath() { return require("path") as typeof import("path"); }
 
@@ -229,6 +284,12 @@ async function local_projectList(): Promise<Project[]> {
   );
 }
 
+async function local_projectDelete(id: string): Promise<void> {
+  const map = getProjectMap();
+  map.delete(id);
+  saveProjectMap(map);
+}
+
 async function local_firmGet(): Promise<FirmProfile | null> {
   if (global.__archpresent_firm__ !== undefined) return global.__archpresent_firm__;
   const fs = getFs();
@@ -255,9 +316,9 @@ async function local_saveFile(
   buffer: Buffer,
   filename: string
 ): Promise<{ url: string; diskPath: string }> {
-  const fs   = getFs();
+  const fs = getFs();
   const path = getPath();
-  const dir  = UPLOAD_DIR();
+  const dir = UPLOAD_DIR();
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const diskPath = path.join(dir, filename);
   fs.writeFileSync(diskPath, buffer);

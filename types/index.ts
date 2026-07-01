@@ -36,6 +36,12 @@ export interface Project {
   overallMoodboard?: OverallMoodboard; // whole-home style collage
   roomMoodboards?: RoomMoodboard[];    // per-room: plan snippet + 3-4 images
   status: "created" | "analyzed" | "styled" | "complete";
+
+  // Shareable client link
+  shareToken?:     string;   // random slug used in /share/[token]
+  shareEnabled?:   boolean;  // false = link disabled even if token exists
+  shareExpiresAt?: string;   // ISO string, undefined = never expires
+  shareViewCount?: number;   // how many times the link was opened
 }
 
 export interface RoomSummary {
@@ -72,14 +78,19 @@ export interface StyleProfile {
 }
 
 export interface MoodImage {
-  url: string;           // image URL
-  caption?: string;      // e.g. "Seating area", "Dining zone"
+  url: string;              // image URL
+  caption?: string;         // e.g. "Seating area", "Dining zone"
+  source: "unsplash" | "ai";        // real photo (Unsplash search) vs AI-generated
+  sourceUrl?: string;       // link back to original Unsplash photo page (credit/buy reference)
+  photographer?: string;    // Unsplash photographer name, for attribution
+  photographerUrl?: string; // Unsplash photographer profile link
 }
 
 export interface RoomMoodboard {
   roomName: string;
   planSnippetUrl?: string;    // cropped portion of the floor plan for this room
   images: MoodImage[];        // 3-4 mood images for this space
+  contextPrompt?: string;     // architect's plain-English brief for this room
 }
 
 export interface OverallMoodboard {
@@ -144,6 +155,7 @@ export interface ProjectStore {
   get(id: string): Promise<Project | null>;
   update(id: string, patch: Partial<Project>): Promise<Project>;
   list(): Promise<Project[]>;
+  delete(id: string): Promise<void>;
 }
 
 // ─── Firm Profile ─────────────────────────────────────────────────────────────
@@ -194,12 +206,23 @@ export interface EnhancedPlan {
 // ─── Extended RoomSummary with spatial detail ─────────────────────────────────
 // Populated by the vision LLM — used to build better moodboard prompts.
 
+export interface RoomBoundingBox {
+  // Normalised 0-1 coordinates relative to plan image dimensions.
+  // Origin (0,0) is top-left. Populated by vision AI room-detection pass
+  // (not yet implemented) or by manual user adjustment in future.
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface RoomDetail extends RoomSummary {
   windowCount?: number;        // estimated windows / natural light openings
   orientation?: string;        // "north-facing", "corner unit" etc.
   adjacentRooms?: string[];    // rooms it connects to
   specialFeatures?: string[];  // "walk-in wardrobe", "attached bath", "double height"
   furnitureHints?: string[];   // furniture visible in plan: "L-sofa", "island counter"
+  boundingBox?: RoomBoundingBox; // real plan coordinates, if known — enables accurate crop
 }
 
 // Extend PlanAnalysis to carry room detail

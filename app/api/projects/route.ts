@@ -107,7 +107,9 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   try {
     const projects = await projectStore.list();
-    return NextResponse.json({ projects });
+    return NextResponse.json({ projects }, {
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
+    });
   } catch (err) {
     console.error("[GET /api/projects]", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

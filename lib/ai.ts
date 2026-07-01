@@ -10,16 +10,18 @@
  *   4. Stub                      [demo mode, no key needed]
  *
  * Moodboard image generation:
- *   1. Hugging Face Inference    [FREE tier — FLUX.1-schnell]
- *   2. Replicate FLUX            [paid fallback]
- *   3. OpenAI DALL-E 3           [paid fallback]
- *   4. Stub (Picsum placeholder) [demo mode]
+ *   1. Pollinations.ai           [FREE — works without a key, more reliable with one]
+ *   2. Replicate FLUX            [paid fallback — only if configured]
+ *   3. OpenAI DALL-E 3           [paid fallback — only if configured]
+ *   4. Stub (Unsplash placeholder) [only if every provider above fails]
  *
  * Set in .env.local:
- *   GOOGLE_AI_KEY=...          ← get free at aistudio.google.com
- *   HF_TOKEN=...               ← get free at huggingface.co/settings/tokens
+ *   GOOGLE_AI_KEY=...           ← get free at aistudio.google.com
+ *   POLLINATIONS_API_KEY=pk_... ← optional but recommended, free at enter.pollinations.ai
+ *                                  (without it, requests share an overloaded public queue
+ *                                  and may need retries — we handle that automatically)
  *
- * Paid fallbacks (optional):
+ * Paid fallbacks (optional, only used if Pollinations is unreachable):
  *   ANTHROPIC_API_KEY / OPENAI_API_KEY / REPLICATE_API_TOKEN
  */
 
@@ -29,6 +31,7 @@ import http from "http";
 import path from "path";
 import type { PlanAnalysis, PlotInfo, RoomDetail, StyleProfile, MoodImage, RoomMoodboard, OverallMoodboard } from "@/types";
 import { saveUploadedFile } from "@/lib/store";
+import { searchUnsplashPhotos, getReplacementPhoto, buildUnsplashQuery } from "@/lib/unsplash";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. PLAN IMAGE ANALYSIS
@@ -311,109 +314,298 @@ export async function generateMoodboardImage(
   room: RoomDetail,
   style: StyleProfile
 ): Promise<string> {
-  // STUB MODE — returns curated placeholder images
-  return moodboardStub(room, style);
-
-  /* REAL AI — uncomment to activate
-  if (process.env.HF_TOKEN) return generateWithHuggingFace(room, style);
+  // First draft = a real, sourceable photo (the Pinterest-style workflow).
+  if (process.env.UNSPLASH_ACCESS_KEY) {
+    try {
+      const query = buildUnsplashQuery(room.name, style.overallStyle, style.palette);
+      const results = await searchUnsplashPhotos(query, 1);
+      if (results[0]) return results[0].url;
+    } catch (err) {
+      console.warn("[ai] Unsplash failed, trying AI generation:", err);
+    }
+  }
+  // AI generation fallback — Pollinations is free, tried first
+  try {
+    return await generateWithPollinations(buildMoodboardPrompt(room, style), room.name);
+  } catch (err) {
+    console.warn("[ai] Pollinations failed, trying paid fallbacks:", err);
+  }
   if (process.env.REPLICATE_API_TOKEN) return generateWithReplicate(room, style);
-  if (process.env.OPENAI_API_KEY) return generateWithDallE(room, style);
+  if (process.env.OPENAI_API_KEY)      return generateWithDallE(room, style);
   return moodboardStub(room, style);
-  */
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NEW: MULTI-IMAGE ROOM MOODBOARDS
+// MULTI-IMAGE ROOM MOODBOARDS — real photos first (Pinterest-style first
+// draft), AI generation as an explicit per-image alternative
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Generate 3-4 mood images for a specific room.
- * In real mode: call image API 3-4 times with varied prompts.
- * In stub mode: return curated Unsplash photos.
+ *
+ * First draft = real Unsplash search results (genuine, buildable reference
+ * photography — what most firms already pull from Pinterest). Each image
+ * can later be individually regenerated with AI or swapped for a different
+ * real photo via the per-image actions in the UI (see PATCH /api/moodboards).
+ *
+ * `contextPrompt` is the architect's optional plain-English brief for this
+ * room (e.g. "client wants a reading nook by the window") — folded into
+ * the search query so results are more relevant to the actual brief.
  */
 export async function generateRoomMoodboard(
   room: RoomDetail,
+  style: StyleProfile,
+  contextPrompt?: string
+): Promise<MoodImage[]> {
+  if (process.env.UNSPLASH_ACCESS_KEY) {
+    try {
+      return await generateRoomMoodboardFromUnsplash(room, style, contextPrompt);
+    } catch (err) {
+      console.warn(`[ai] Unsplash failed for ${room.name}, falling back to AI generation:`, err);
+    }
+  }
+  // No Unsplash key configured, or it failed entirely — generate with AI instead
+  return generateRoomMoodboardReal(room, style);
+}
+
+const ROOM_IMAGE_CAPTIONS = ["Wide view", "Detail", "Atmosphere", "Close-up"];
+
+async function generateRoomMoodboardFromUnsplash(
+  room: RoomDetail,
+  style: StyleProfile,
+  contextPrompt?: string
+): Promise<MoodImage[]> {
+  const query = buildUnsplashQuery(room.name, style.overallStyle, style.palette, contextPrompt);
+  const results = await searchUnsplashPhotos(query, 4);
+
+  if (results.length === 0) {
+    throw new Error("No Unsplash results");
+  }
+
+  // Apply our own captions (wide/detail/atmosphere/close-up) over whatever
+  // alt-text Unsplash returned, for visual consistency with the AI path
+  return results.map((img, i) => ({
+    ...img,
+    caption: ROOM_IMAGE_CAPTIONS[i] ?? img.caption,
+  }));
+}
+
+// AI-generated fallback — 3-4 images via varied prompts (wide shot, detail,
+// atmosphere, close-up). Used when Unsplash isn't configured or fails.
+async function generateRoomMoodboardReal(
+  room: RoomDetail,
   style: StyleProfile
 ): Promise<MoodImage[]> {
-  return roomMoodboardStub(room, style);
+  const promptVariants = [
+    buildMoodboardPrompt(room, style),
+    buildMoodboardPrompt(room, style) + " detail shot, close-up",
+    buildMoodboardPrompt(room, style) + " atmospheric, moody lighting",
+    buildMoodboardPrompt(room, style) + " textural close-up, materials",
+  ];
+
+  const images: MoodImage[] = [];
+
+  for (let i = 0; i < 4; i++) {
+    try {
+      const url = await generateSingleImage(promptVariants[i]);
+      images.push({ url, caption: ROOM_IMAGE_CAPTIONS[i], source: "ai" });
+    } catch (err) {
+      console.warn(`[ai] Room image ${i + 1} failed:`, err);
+      const stubUrl = await moodboardStub(room, style);
+      images.push({ url: stubUrl, caption: ROOM_IMAGE_CAPTIONS[i], source: "ai" });
+    }
+  }
+
+  return images;
+}
+
+// Generate a single image — tries Pollinations first (free), falls back to
+// paid providers only if explicitly configured.
+async function generateSingleImage(prompt: string): Promise<string> {
+  try {
+    return await generateWithPollinations(prompt, "room");
+  } catch (err) {
+    console.warn("[ai] Pollinations failed for variant image:", err);
+  }
+  throw new Error("Image generation failed — Pollinations unavailable and no paid fallback configured");
+}
+
+/**
+ * Regenerate a single image for a room, either as a different real photo
+ * (Unsplash, excluding URLs already shown) or as a fresh AI generation.
+ * Used by the per-image "Try another" / "Generate with AI" actions.
+ */
+export async function regenerateSingleRoomImage(
+  room: RoomDetail,
+  style: StyleProfile,
+  mode: "photo" | "ai",
+  contextPrompt: string | undefined,
+  existingUrls: string[],
+  caption?: string
+): Promise<MoodImage> {
+  if (mode === "photo") {
+    if (!process.env.UNSPLASH_ACCESS_KEY) {
+      throw new Error(
+        "UNSPLASH_NOT_CONFIGURED: Add UNSPLASH_ACCESS_KEY to .env.local to browse real photos. " +
+        "Get a free key at unsplash.com/developers."
+      );
+    }
+    const query = buildUnsplashQuery(room.name, style.overallStyle, style.palette, contextPrompt);
+    const replacement = await getReplacementPhoto(query, existingUrls);
+    return { ...replacement, caption: caption ?? replacement.caption };
+  }
+
+  // mode === "ai"
+  const prompt = buildMoodboardPrompt(room, style) +
+    (caption === "Detail" ? " detail shot, close-up" :
+     caption === "Atmosphere" ? " atmospheric, moody lighting" :
+     caption === "Close-up" ? " textural close-up, materials" : "");
+  const url = await generateSingleImage(prompt);
+  return { url, caption: caption ?? "AI concept", source: "ai" };
 }
 
 /**
  * Generate the overall whole-home style moodboard (4 hero images).
- * Shows the full interior language of the project.
+ * Real Unsplash photos first; AI generation as fallback.
  */
 export async function generateOverallMoodboard(
   rooms: RoomDetail[],
   style: StyleProfile
 ): Promise<OverallMoodboard> {
-  return overallMoodboardStub(rooms, style);
-}
+  const captions = ["Living spaces", "Kitchen & dining", "Bedrooms", "Bathrooms & details"];
+  const styleStatement = STYLE_STATEMENTS[style.overallStyle] ?? "A considered interior designed around your life.";
 
-// ── Hugging Face Inference API (FREE) ─────────────────────────────────────────
-//
-// Model: black-forest-labs/FLUX.1-schnell
-// Free tier: ~unknown rate limit but generous for personal/small use
-// Docs: huggingface.co/docs/api-inference
-//
-// NOTE: HF free tier can be slow (cold starts, queue).
-// Response is raw image bytes — we save locally.
-
-async function generateWithHuggingFace(
-  room: RoomDetail,
-  style: StyleProfile
-): Promise<string> {
-  const prompt = buildMoodboardPrompt(room, style);
-
-  // Try FLUX.1-schnell first (best quality, usually available)
-  const models = [
-    "black-forest-labs/FLUX.1-schnell",
-    "stabilityai/stable-diffusion-xl-base-1.0",  // fallback if FLUX quota hit
-  ];
-
-  let lastError: Error | null = null;
-
-  for (const model of models) {
+  if (process.env.UNSPLASH_ACCESS_KEY) {
     try {
-      const url  = `https://api-inference.huggingface.co/models/${model}`;
-      const body = JSON.stringify({
-        inputs: prompt,
-        parameters: {
-          width: 1024,
-          height: 576,
-          num_inference_steps: 4,   // schnell needs only 4 steps
-          guidance_scale: 0,        // schnell uses 0 guidance
-        },
-        options: {
-          wait_for_model: true,     // wait instead of returning 503
-        },
-      });
-
-      console.log(`[ai] Calling HF model: ${model}`);
-
-      const imageBuffer = await fetchImageBuffer(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.HF_TOKEN}`,
-          "Content-Type": "application/json",
-          "x-wait-for-model": "true",
-        },
-        body,
-      });
-
-      const slug  = room.name.toLowerCase().replace(/\s+/g, "-");
-      const fname = `moodboard-${slug}-${Date.now()}.jpg`;
-      const { url: localUrl } = await saveUploadedFile(imageBuffer, fname);
-      console.log(`[ai] HF moodboard saved: ${fname}`);
-      return localUrl;
-
+      const queries: Record<string, string> = {
+        "Living spaces":       `living room ${style.overallStyle} interior design`,
+        "Kitchen & dining":    `kitchen dining ${style.overallStyle} interior design`,
+        "Bedrooms":            `bedroom ${style.overallStyle} interior design`,
+        "Bathrooms & details": `bathroom ${style.overallStyle} interior design`,
+      };
+      const images: MoodImage[] = [];
+      for (const caption of captions) {
+        const results = await searchUnsplashPhotos(queries[caption], 1);
+        if (results[0]) images.push({ ...results[0], caption });
+      }
+      if (images.length === captions.length) {
+        return { images, styleStatement };
+      }
     } catch (err) {
-      console.warn(`[ai] HF model ${model} failed:`, err);
-      lastError = err as Error;
-      continue;
+      console.warn("[ai] Unsplash failed for overall moodboard, falling back to AI:", err);
     }
   }
 
-  throw lastError ?? new Error("All Hugging Face models failed");
+  // AI generation fallback
+  const promptsByCaption: Record<string, string> = {
+    "Living spaces":         `Professional interior design photograph, living room and lounge area, ${style.overallStyle} style, photorealistic, 4K, magazine quality, no people.`,
+    "Kitchen & dining":      `Professional interior design photograph, kitchen and dining area, ${style.overallStyle} style, photorealistic, 4K, magazine quality, no people.`,
+    "Bedrooms":              `Professional interior design photograph, bedroom interior, ${style.overallStyle} style, photorealistic, 4K, magazine quality, no people.`,
+    "Bathrooms & details":   `Professional interior design photograph, bathroom interior with fine details, ${style.overallStyle} style, photorealistic, 4K, magazine quality, no people.`,
+  };
+
+  const images: MoodImage[] = [];
+  for (const caption of captions) {
+    try {
+      const url = await generateWithPollinations(promptsByCaption[caption], caption);
+      images.push({ url, caption, source: "ai" });
+    } catch (err) {
+      console.warn(`[ai] Overall moodboard image "${caption}" failed, using stub:`, err);
+      const stub = await overallMoodboardStub(rooms, style);
+      const fallback = stub.images.find((i) => i.caption === caption) ?? stub.images[0];
+      images.push(fallback);
+    }
+  }
+
+  return { images, styleStatement };
+}
+
+// ── Pollinations.ai (FREE — key recommended, no credit card) ──────────────────
+//
+// Model: flux. Docs: github.com/pollinations/pollinations/blob/main/APIDOCS.md
+//
+// Pollinations migrated off the old unauthenticated `image.pollinations.ai`
+// endpoint, which is now a legacy, overloaded, frequently-queue-full path
+// shared by every anonymous caller worldwide ("Queue full (50/50)" errors).
+// The current endpoint is `gen.pollinations.ai`, which works without a key
+// for light/occasional use but is far more reliable with a free key from
+// enter.pollinations.ai (no credit card, just sign in with GitHub).
+//
+// Set POLLINATIONS_API_KEY in .env.local to use a key. Without one, this
+// still works — just more likely to hit transient queue-full errors, which
+// we retry with backoff before giving up.
+
+async function generateWithPollinations(prompt: string, label: string): Promise<string> {
+  const seed = Date.now() % 1000000 + Math.floor(Math.random() * 1000);
+  const encodedPrompt = encodeURIComponent(prompt);
+  const apiKey = process.env.POLLINATIONS_API_KEY;
+
+  const url = `https://gen.pollinations.ai/image/${encodedPrompt}` +
+    `?model=flux&width=1344&height=768&seed=${seed}&nologo=true`;
+  // API key (if set) is sent via Authorization header below, not the URL
+
+  const maxAttempts = 3;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`[ai] Pollinations request for "${label}" (attempt ${attempt}/${maxAttempts})`);
+
+      const res = await fetch(url, {
+        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      });
+
+      // Queue-full / overload — back off and retry rather than failing immediately
+      if (res.status === 500 || res.status === 503 || res.status === 429) {
+        const body = await res.text().catch(() => "");
+        lastError = new Error(`Pollinations HTTP ${res.status}: ${body.slice(0, 150)}`);
+        if (attempt < maxAttempts) {
+          const waitMs = attempt * 4000; // 4s, 8s
+          console.warn(`[ai] Pollinations overloaded — retrying in ${waitMs / 1000}s…`);
+          await delay(waitMs);
+          continue;
+        }
+        throw lastError;
+      }
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Pollinations HTTP ${res.status}: ${body.slice(0, 150)}`);
+      }
+
+      const contentType = res.headers.get("content-type") ?? "";
+      if (!contentType.startsWith("image/")) {
+        const body = await res.text().catch(() => "");
+        throw new Error(`Pollinations non-image response (${contentType}): ${body.slice(0, 150)}`);
+      }
+
+      const imageBuffer = Buffer.from(await res.arrayBuffer());
+      if (imageBuffer.length < 1000) {
+        throw new Error("Pollinations response too small — likely an error page");
+      }
+
+      const slug  = label.toLowerCase().replace(/\s+/g, "-").slice(0, 40);
+      const ext   = contentType.includes("png") ? "png" : "jpg";
+      const fname = `moodboard-${slug}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+      const { url: localUrl } = await saveUploadedFile(imageBuffer, fname);
+
+      console.log(`[ai] Pollinations success → ${fname} (${(imageBuffer.length / 1024).toFixed(0)} KB)`);
+      return localUrl;
+
+    } catch (err) {
+      lastError = err as Error;
+      const msg = String(err);
+      // Non-retryable errors (bad URL, auth, etc.) — fail fast
+      if (!msg.includes("500") && !msg.includes("503") && !msg.includes("429")) {
+        throw err;
+      }
+      if (attempt < maxAttempts) {
+        await delay(attempt * 4000);
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Pollinations generation failed after retries");
 }
 
 // ── Replicate FLUX (paid fallback) ────────────────────────────────────────────
@@ -773,7 +965,7 @@ const ROOM_CAPTIONS: Record<string, string[]> = {
 
 const OVERALL_PHOTOS: Record<string, string[]> = {
   Modern:       ["photo-1567767292278-a204e43f6cd1","photo-1556909114-f6e7ad7d3136","photo-1631049307264-da0ec9d70304","photo-1552321554-5fefe8c9ef14"],
-  Contemporary: ["photo-1555041469-a586c61ea9bc","photo-1565183997392-2f6f122e5912","photo-1616594039964-ae9021a400a0","photo-1600607687939-ce8a6c25118c"],
+  Contemporary: ["photo-1555041469-a586c61ea9bc","photo-1556909114-f6e7ad7d3136","photo-1616594039964-ae9021a400a0","photo-1600607687939-ce8a6c25118c"],
   Scandinavian: ["photo-1586023492125-27b2c045efd7","photo-1588854337221-4cf9fa96059c","photo-1540304801897-4bd1e5fe2a98","photo-1507652955-f3dcef5a3be5"],
   Minimal:      ["photo-1449247709967-d4461a6a6103","photo-1556909172-54557c7e4fb7","photo-1505693416388-ac5ce068fe85","photo-1552321554-5fefe8c9ef14"],
   Industrial:   ["photo-1505409628601-edc9af17fda6","photo-1585515320310-259814833e62","photo-1493809842364-78817add7ffb","photo-1603512500383-b6f84e07e79f"],
@@ -805,14 +997,22 @@ async function roomMoodboardStub(room: RoomDetail, style: StyleProfile): Promise
   await delay(400);
   const ids      = (ROOM_PHOTOS[room.name] ?? ROOM_PHOTOS["Living Room"])[style.overallStyle] ?? (ROOM_PHOTOS[room.name] ?? ROOM_PHOTOS["Living Room"])["Modern"];
   const captions = ROOM_CAPTIONS[room.name] ?? ["Wide view","Detail","Atmosphere","Close-up"];
-  return ids.map((id, i) => ({ url: unsplashUrl(id, i === 0 ? 1200 : 800, i === 0 ? 675 : 600), caption: captions[i] ?? `Image ${i+1}` }));
+  return ids.map((id, i) => ({
+    url: unsplashUrl(id, i === 0 ? 1200 : 800, i === 0 ? 675 : 600),
+    caption: captions[i] ?? `Image ${i+1}`,
+    source: "ai" as const, // stub/placeholder, treated as non-photo-credited
+  }));
 }
 
 async function overallMoodboardStub(_rooms: RoomDetail[], style: StyleProfile): Promise<OverallMoodboard> {
   await delay(500);
   const ids = OVERALL_PHOTOS[style.overallStyle] ?? OVERALL_PHOTOS["Modern"];
   return {
-    images: ids.map((id, i) => ({ url: unsplashUrl(id, 900, 600), caption: OVERALL_CAPTIONS[i] ?? `Space ${i+1}` })),
+    images: ids.map((id, i) => ({
+      url: unsplashUrl(id, 900, 600),
+      caption: OVERALL_CAPTIONS[i] ?? `Space ${i+1}`,
+      source: "ai" as const,
+    })),
     styleStatement: STYLE_STATEMENTS[style.overallStyle] ?? "A considered interior designed around your life.",
   };
 }

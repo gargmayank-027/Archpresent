@@ -19,6 +19,12 @@ import {
   StandardFonts,
   PDFFont,
   PDFPage,
+  PDFImage,
+  pushGraphicsState,
+  popGraphicsState,
+  rectangle,
+  clip,
+  endPath,
 } from "pdf-lib";
 import fs from "fs";
 import https from "https";
@@ -30,6 +36,7 @@ import { firmStore } from "@/lib/store";
 const W  = 1190;   // 16 units
 const H  = 669;    // ~9 units  (1190/16*9 = 669.375)
 const M  = 56;     // margin
+const FOOTER_H = 38; // vertical space reserved at bottom for the footer band; no slide content may enter this zone
 
 // ─── Accent colors ────────────────────────────────────────────────────────────
 const ACCENT_COLORS: Record<PdfAccentColor, RGB> = {
@@ -174,11 +181,11 @@ async function addCoverSlide(
     x: M, y: projY - 44, size: 14, font: italic, color: C.white, opacity: 0.9,
   });
 
-  // Date — bottom left of panel
+  // Date — bottom left of panel, clear of the global footer band
   const dateStr = new Date(project.createdAt).toLocaleDateString("en-GB", {
     year: "numeric", month: "long", day: "numeric",
   });
-  page.drawText(dateStr, { x: M, y: M + 16, size: 8, font, color: rgb(1,1,1), opacity: 0.45 });
+  page.drawText(dateStr, { x: M, y: M + FOOTER_H + 14, size: 8, font, color: rgb(1,1,1), opacity: 0.45 });
 
   // ── Right panel content ─────────────────────────────────────────────────
   const rx = splitX + M;  // right content x-origin
@@ -228,9 +235,9 @@ async function addCoverSlide(
     });
   }
 
-  // Firm tagline — lower right
+  // Firm tagline — lower right, clear of the global footer band
   if (firm?.tagline) {
-    page.drawText(firm.tagline, { x: rx, y: M + 20, size: 10, font, color: C.muted });
+    page.drawText(firm.tagline, { x: rx, y: M + FOOTER_H + 14, size: 10, font, color: C.muted });
   }
 }
 
@@ -291,25 +298,40 @@ async function addSiteContextSlide(
     }
   }
 
-  // Compass rose — right side
+  // Compass rose — right side, sized to fill its dedicated panel
   if (p.facing) {
-    const cx = W * 0.78;
-    const cy = H * 0.50;
-    const r  = 80;
+    const cx = W * 0.785;
+    const cy = H * 0.52;
+    const r  = 108; // enlarged from 80 — fills the panel with real presence
 
-    page.drawCircle({ x: cx, y: cy, size: r, borderColor: C.rule, borderWidth: 1.5 });
-    page.drawCircle({ x: cx, y: cy, size: 4, color: accent });
+    // Soft filled dial behind the ring
+    page.drawCircle({ x: cx, y: cy, size: r + 4, color: C.altRow });
+    page.drawCircle({ x: cx, y: cy, size: r, borderColor: C.rule, borderWidth: 1.5, color: C.white });
+
+    // Tick marks at 8 compass points
+    for (let deg = 0; deg < 360; deg += 45) {
+      const rad2 = (deg * Math.PI) / 180;
+      const isCardinal = deg % 90 === 0;
+      const innerR = isCardinal ? r - 12 : r - 7;
+      page.drawLine({
+        start: { x: cx + Math.cos(rad2) * innerR, y: cy + Math.sin(rad2) * innerR },
+        end:   { x: cx + Math.cos(rad2) * r,      y: cy + Math.sin(rad2) * r },
+        thickness: isCardinal ? 1.2 : 0.6, color: C.muted,
+      });
+    }
+
+    page.drawCircle({ x: cx, y: cy, size: 5, color: accent });
 
     const cardinals = [
-      { l: "N", dx: 0, dy: r + 14 }, { l: "S", dx: 0, dy: -r - 22 },
-      { l: "E", dx: r + 10, dy: -4 }, { l: "W", dx: -r - 22, dy: -4 },
+      { l: "N", dx: 0, dy: r + 18 }, { l: "S", dx: 0, dy: -r - 28 },
+      { l: "E", dx: r + 14, dy: -5 }, { l: "W", dx: -r - 28, dy: -5 },
     ];
     for (const c of cardinals) {
       const active = p.facing!.startsWith(c.l);
       page.drawText(c.l, {
         x: cx + c.dx - 5, y: cy + c.dy,
-        size: 12, font: active ? bold : font,
-        color: active ? accent : C.light,
+        size: 14, font: active ? bold : font,
+        color: active ? accent : C.muted,
       });
     }
 
@@ -318,11 +340,22 @@ async function addSiteContextSlide(
       "North-East": 45, "North-West": 135, "South-East": 315, "South-West": 225,
     };
     const rad = ((angles[p.facing] ?? 90) * Math.PI) / 180;
+    const tipX = cx + Math.cos(rad) * (r - 10);
+    const tipY = cy + Math.sin(rad) * (r - 10);
+
     page.drawLine({
-      start: { x: cx, y: cy },
-      end:   { x: cx + Math.cos(rad) * (r - 8), y: cy + Math.sin(rad) * (r - 8) },
-      thickness: 3, color: accent,
+      start: { x: cx, y: cy }, end: { x: tipX, y: tipY },
+      thickness: 3.5, color: accent,
     });
+
+    // Arrowhead at the pointer tip — two short lines rather than an SVG
+    // path (pdf-lib's drawSvgPath can render multi-segment paths
+    // unreliably; plain drawLine is guaranteed to work).
+    const headLen = 11, headAngle = 0.5;
+    const back1 = { x: tipX - headLen * Math.cos(rad - headAngle), y: tipY - headLen * Math.sin(rad - headAngle) };
+    const back2 = { x: tipX - headLen * Math.cos(rad + headAngle), y: tipY - headLen * Math.sin(rad + headAngle) };
+    page.drawLine({ start: { x: tipX, y: tipY }, end: back1, thickness: 3.5, color: accent });
+    page.drawLine({ start: { x: tipX, y: tipY }, end: back2, thickness: 3.5, color: accent });
 
     // Label below compass
     page.drawText(`${p.facing} facing`, {
@@ -426,11 +459,11 @@ async function addStrengthsSlide(
   const col1     = strengths.slice(0, Math.ceil(maxItems / 2));
   const col2     = strengths.slice(Math.ceil(maxItems / 2), maxItems);
 
-  function drawBullets(bullets: string[], xStart: number) {
+  function drawBullets(bullets: string[], xStart: number, startNum: number) {
     let y = H - 130;
     for (const [i, text] of bullets.entries()) {
-      // Number
-      page.drawText(String(i + 1).padStart(2, "0"), {
+      // Number — continuous across both columns, not reset per column
+      page.drawText(String(startNum + i).padStart(2, "0"), {
         x: xStart, y, size: 20, font: bold, color: C.rule,
       });
       // Text — wrapped
@@ -451,13 +484,13 @@ async function addStrengthsSlide(
     }
   }
 
-  drawBullets(col1, M);
-  drawBullets(col2.map((s, i) => s), M + colW + 32);
+  drawBullets(col1, M, 1);
+  drawBullets(col2, M + colW + 32, col1.length + 1);
 
-  // Room tags at bottom
+  // Room tags — sit clear of the global footer band
   const roomTags = (project.analysis?.rooms ?? []).map((r) => r.name).join("  ·  ");
   if (roomTags) {
-    page.drawText(roomTags, { x: M, y: M + 50, size: 8, font, color: C.muted });
+    page.drawText(roomTags, { x: M, y: M + FOOTER_H + 14, size: 8, font, color: C.muted });
   }
 }
 
@@ -551,7 +584,7 @@ async function addOverallMoodboardSlide(
   const gridLeft  = W * 0.42;
   const gridRight = W - 16;
   const gridTop   = H - 16;
-  const gridBot   = 50;
+  const gridBot   = M + FOOTER_H + 44; // clear of palette tags + footer band
   const gW  = (gridRight - gridLeft - 8) / 2;
   const gH  = (gridTop - gridBot - 8) / 2;
 
@@ -570,7 +603,18 @@ async function addOverallMoodboardSlide(
       if (!buf) continue;
       const pImg = await embedImageSafe(doc, buf);
       if (!pImg) continue;
-      page.drawImage(pImg, { x: pos.x, y: pos.y, width: gW, height: gH });
+
+      // Cover-crop into the cell — preserves aspect ratio, fills exactly,
+      // no stretching/distortion (previous version stretched to gW×gH).
+      const scale = Math.max(gW / pImg.width, gH / pImg.height);
+      const dw    = pImg.width  * scale;
+      const dh    = pImg.height * scale;
+      const dx    = pos.x - (dw - gW) / 2;
+      const dy    = pos.y - (dh - gH) / 2;
+
+      drawClippedImage(page, pImg, { x: dx, y: dy, width: dw, height: dh },
+        { x: pos.x, y: pos.y, width: gW, height: gH });
+
       // Caption overlay
       page.drawRectangle({ x: pos.x, y: pos.y, width: gW, height: 22, color: rgb(0,0,0), opacity: 0.55 });
       page.drawText((img.caption ?? "").toUpperCase(), {
@@ -579,18 +623,19 @@ async function addOverallMoodboardSlide(
     } catch { /* skip */ }
   }
 
-  // Palette tags bottom-left
+  // Palette tags — clear of the global footer band
   const tags = [
     project.styleProfile?.overallStyle,
     project.styleProfile?.palette?.replace(/([A-Z])/g, " $1").trim(),
     project.styleProfile?.budgetVibe,
   ].filter(Boolean) as string[];
 
+  const tagY = M + FOOTER_H + 16;
   let tx = M;
   for (const tag of tags) {
-    page.drawRectangle({ x: tx, y: 60, width: font.widthOfTextAtSize(tag, 8) + 16, height: 18,
+    page.drawRectangle({ x: tx, y: tagY, width: font.widthOfTextAtSize(tag, 8) + 16, height: 18,
       borderColor: accent, borderWidth: 0.5 });
-    page.drawText(tag.toUpperCase(), { x: tx + 8, y: 66, size: 8, font, color: C.light });
+    page.drawText(tag.toUpperCase(), { x: tx + 8, y: tagY + 6, size: 8, font, color: C.light });
     tx += font.widthOfTextAtSize(tag, 8) + 28;
   }
 }
@@ -622,9 +667,10 @@ async function addRoomMoodboardSlide(
   });
 
   // ── Left panel: plan snippet ─────────────────────────────────────────────
-  const leftW = W * 0.28;
-  const planY = H - M - 120;
-  const planH = planY - 80;
+  const leftW    = W * 0.28;
+  const planBotY = M + FOOTER_H + 38; // top of the features-tag zone, clear of footer
+  const planY    = H - M - 120;
+  const planH    = planY - planBotY;
 
   // Room detail info
   const roomDetail = project.analysis?.rooms.find((r) => r.name === rm.roomName);
@@ -644,7 +690,8 @@ async function addRoomMoodboardSlide(
     });
   }
 
-  // Plan snippet image
+  // Plan snippet image — real crop if we have one, otherwise the full plan
+  // (honest fallback rather than a placeholder box or a guessed crop)
   if (rm.planSnippetUrl) {
     try {
       const buf = await loadImageBytes(rm.planSnippetUrl);
@@ -652,22 +699,34 @@ async function addRoomMoodboardSlide(
         const pImg = await doc.embedPng(buf).catch(() => doc.embedJpg(buf));
         const dims = pImg.scaleToFit(leftW - M - 8, planH);
         const sx   = M + (leftW - M - 8 - dims.width) / 2;
-        const sy   = 80 + (planH - dims.height) / 2;
+        const sy   = planBotY + (planH - dims.height) / 2;
         page.drawRectangle({ x: sx - 4, y: sy - 4, width: dims.width + 8, height: dims.height + 8,
           color: C.white, borderColor: C.rule, borderWidth: 0.5 });
         page.drawImage(pImg, { x: sx, y: sy, width: dims.width, height: dims.height });
       }
     } catch { /* skip */ }
   } else {
-    // No snippet — draw placeholder
-    page.drawRectangle({ x: M, y: 80, width: leftW - M - 8, height: planH,
-      color: C.altRow, borderColor: C.rule, borderWidth: 0.5 });
-    page.drawText("PLAN SNIPPET", { x: M + 12, y: 80 + planH / 2, size: 8, font, color: C.muted });
+    try {
+      const buf = await loadImageBytes(project.planImageUrl);
+      if (!buf) throw new Error("no plan image");
+      const pImg = await doc.embedPng(buf).catch(() => doc.embedJpg(buf));
+      const dims = pImg.scaleToFit(leftW - M - 8, planH);
+      const sx   = M + (leftW - M - 8 - dims.width) / 2;
+      const sy   = planBotY + (planH - dims.height) / 2;
+      page.drawRectangle({ x: sx - 4, y: sy - 4, width: dims.width + 8, height: dims.height + 8,
+        color: C.white, borderColor: C.rule, borderWidth: 0.5 });
+      page.drawImage(pImg, { x: sx, y: sy, width: dims.width, height: dims.height });
+      page.drawText("Full plan reference", { x: sx, y: sy - 14, size: 6.5, font, color: C.muted });
+    } catch {
+      page.drawRectangle({ x: M, y: planBotY, width: leftW - M - 8, height: planH,
+        color: C.altRow, borderColor: C.rule, borderWidth: 0.5 });
+      page.drawText("PLAN", { x: M + 12, y: planBotY + planH / 2, size: 8, font, color: C.muted });
+    }
   }
 
-  // Special features tags
+  // Special features tags — sit between the plan box and the footer
   if (roomDetail?.specialFeatures?.length) {
-    let fy = 64;
+    let fy = M + FOOTER_H + 24;
     for (const feat of roomDetail.specialFeatures.slice(0, 3)) {
       page.drawText(`· ${feat}`, { x: M, y: fy, size: 8, font, color: C.muted });
       fy -= 12;
@@ -675,47 +734,71 @@ async function addRoomMoodboardSlide(
   }
 
   // ── Right panel: mood images ─────────────────────────────────────────────
-  const rx   = leftW + 16;
-  const rW   = W - rx - M;
-  const imgH = (H - 90) * 0.55;   // top 3 images
-  const imgW = (rW - 8) / 3;
+  // Top row (3 images) + a full-bleed strip below, filling the page edge-to-
+  // edge with no dead space — strip is cropped to fill (cover), not fitted.
+  const rx       = leftW + 16;
+  const rW       = W - rx - M;
+  const topY     = H - 30;                 // top edge of the image block
+  const bottomY  = M + FOOTER_H + 12;       // bottom edge, clear of footer
+  const gap      = 6;
+  const stripH   = rm.images[3] ? (H - 90) * 0.30 : 0;
+  const imgH     = rm.images[3]
+    ? (topY - bottomY - stripH - gap)
+    : (topY - bottomY);
+  const imgW     = (rW - gap * 2) / 3;
 
-  // Top row: 3 images
+  // Top row: 3 images, cover-cropped to fill each cell exactly (no gaps)
   for (let i = 0; i < Math.min(3, rm.images.length); i++) {
     const img = rm.images[i];
-    const ix  = rx + i * (imgW + 4);
+    const ix  = rx + i * (imgW + gap);
     try {
       const buf  = await fetchRemoteImageSafe(img.url);
       if (!buf) continue;
       const pImg = await embedImageSafe(doc, buf);
       if (!pImg) continue;
-      const dims = pImg.scaleToFit(imgW, imgH);
-      page.drawImage(pImg, { x: ix, y: H - 30 - imgH + (imgH - dims.height) / 2, width: dims.width, height: dims.height });
+
+      // Cover-fit: scale to fill the cell, crop overflow via clipping rect
+      const scale  = Math.max(imgW / pImg.width, imgH / pImg.height);
+      const dw     = pImg.width  * scale;
+      const dh     = pImg.height * scale;
+      const dx     = ix - (dw - imgW) / 2;
+      const dy     = (topY - imgH) - (dh - imgH) / 2;
+
+      page.drawRectangle({ x: ix, y: topY - imgH, width: imgW, height: imgH, color: C.altRow });
+      drawClippedImage(page, pImg, { x: dx, y: dy, width: dw, height: dh },
+        { x: ix, y: topY - imgH, width: imgW, height: imgH });
+
       // Caption
-      page.drawRectangle({ x: ix, y: H - 30 - imgH, width: dims.width, height: 18,
+      page.drawRectangle({ x: ix, y: topY - imgH, width: imgW, height: 18,
         color: rgb(0,0,0), opacity: 0.5 });
       page.drawText((img.caption ?? "").toUpperCase(), {
-        x: ix + 6, y: H - 30 - imgH + 5, size: 7, font, color: C.white, opacity: 0.85,
+        x: ix + 6, y: topY - imgH + 5, size: 7, font, color: C.white, opacity: 0.85,
       });
     } catch { /* skip */ }
   }
 
-  // 4th image: full-width strip below top row
+  // 4th image: full-width strip filling all remaining vertical space, cover-cropped
   if (rm.images[3]) {
-    const img   = rm.images[3];
-    const stripY = M + 24;
-    const stripH = (H - 90) * 0.32;
+    const img = rm.images[3];
     try {
       const buf  = await fetchRemoteImageSafe(img.url);
       if (buf) {
         const pImg = await embedImageSafe(doc, buf);
         if (pImg) {
-          const dims = pImg.scaleToFit(rW, stripH);
-          page.drawImage(pImg, { x: rx, y: stripY, width: dims.width, height: dims.height });
-          page.drawRectangle({ x: rx, y: stripY, width: dims.width, height: 20,
+          const scale = Math.max(rW / pImg.width, stripH / pImg.height);
+          const dw    = pImg.width  * scale;
+          const dh    = pImg.height * scale;
+          const dx    = rx - (dw - rW) / 2;
+          const dy    = bottomY - (dh - stripH) / 2;
+
+          page.drawRectangle({ x: rx, y: bottomY, width: rW, height: stripH, color: C.altRow });
+          drawClippedImage(page, pImg, { x: dx, y: dy, width: dw, height: dh },
+            { x: rx, y: bottomY, width: rW, height: stripH });
+
+          page.drawRectangle({ x: rx, y: bottomY, width: rW, height: 20,
             color: rgb(0,0,0), opacity: 0.55 });
           page.drawText((img.caption ?? "").toUpperCase(), {
-            x: rx + 8, y: stripY + 7, size: 7, font, color: C.white, opacity: 0.85,
+            x: rx + 8, y: bottomY + 7, size: 7, font, color: C.white, opacity: 0.85,
           });
         }
       }
@@ -724,6 +807,28 @@ async function addRoomMoodboardSlide(
 }
 
 // ─── Safe image helpers ───────────────────────────────────────────────────────
+
+/**
+ * Draws an image clipped to a rectangular cell, producing a true "cover crop"
+ * (image fills the cell, overflow outside it is hidden) rather than
+ * letterboxing. pdf-lib has no built-in image-clip helper, so we use its
+ * raw content-stream operators: save state, set a clip path, draw, restore.
+ */
+function drawClippedImage(
+  page: PDFPage,
+  img: PDFImage,
+  drawRect: { x: number; y: number; width: number; height: number },
+  clipRect: { x: number; y: number; width: number; height: number },
+) {
+  page.pushOperators(
+    pushGraphicsState(),
+    rectangle(clipRect.x, clipRect.y, clipRect.width, clipRect.height),
+    clip(),
+    endPath(),
+  );
+  page.drawImage(img, drawRect);
+  page.pushOperators(popGraphicsState());
+}
 
 async function fetchRemoteImageSafe(url: string): Promise<Buffer | null> {
   try {

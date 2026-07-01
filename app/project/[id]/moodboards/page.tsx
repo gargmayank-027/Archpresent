@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
 import type {
-  Project, StyleProfile, OverallMoodboard, RoomMoodboard,
+  Project, StyleProfile, OverallMoodboard, RoomMoodboard, MoodImage,
   OverallStyle, Palette, BudgetVibe,
 } from "@/types";
 
@@ -31,6 +31,9 @@ const BUDGET_OPTIONS: { value: BudgetVibe; label: string }[] = [
   { value: "Premium",   label: "Premium" },
 ];
 
+// Rooms we always try to generate moodboards for
+const KEY_ROOM_PATTERNS = ["Living Room", "Kitchen", "Master Bedroom", "Bedroom 2", "Bedroom 3", "Balcony"];
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function MoodboardsPage() {
@@ -40,8 +43,10 @@ export default function MoodboardsPage() {
   const [loading,          setLoading]          = useState(true);
   const [generating,       setGenerating]       = useState(false);
   const [globalError,      setGlobalError]      = useState<string | null>(null);
-  const [showWarmup,       setShowWarmup]        = useState(false);
+  const [showWarmup,       setShowWarmup]       = useState(false);
   const [currentStep,      setCurrentStep]      = useState("");
+  const [imagesGenerated,  setImagesGenerated]  = useState(0);
+  const [totalImages,      setTotalImages]      = useState(0);
 
   // Style form
   const [overallStyle, setOverallStyle] = useState<OverallStyle>("Modern");
@@ -49,10 +54,13 @@ export default function MoodboardsPage() {
   const [budgetVibe,   setBudgetVibe]   = useState<BudgetVibe>("MidRange");
   const [hardNo,       setHardNo]       = useState("");
 
+  // Per-room plain-English context prompts (optional)
+  const [contextPrompts, setContextPrompts] = useState<Record<string, string>>({});
+
   // Results
-  const [overallMoodboard,  setOverallMoodboard]  = useState<OverallMoodboard | null>(null);
-  const [roomMoodboards,    setRoomMoodboards]    = useState<RoomMoodboard[]>([]);
-  const [styleSet,          setStyleSet]          = useState(false);
+  const [overallMoodboard, setOverallMoodboard] = useState<OverallMoodboard | null>(null);
+  const [roomMoodboards,   setRoomMoodboards]   = useState<RoomMoodboard[]>([]);
+  const [styleSet,         setStyleSet]         = useState(false);
 
   const STEPS = [
     { num: "1", label: "Upload",     status: "complete" as const },
@@ -62,7 +70,7 @@ export default function MoodboardsPage() {
   ];
 
   useEffect(() => {
-    fetch(`/api/projects/${id}`)
+    fetch(`/api/projects/${id}`, { cache: "no-store" })
       .then((r) => r.json())
       .then((d: { project: Project }) => {
         const p = d.project;
@@ -74,28 +82,46 @@ export default function MoodboardsPage() {
           setHardNo(p.styleProfile.hardNo ?? "");
           setStyleSet(true);
         }
-        if (p.overallMoodboard)                  setOverallMoodboard(p.overallMoodboard);
-        if (p.roomMoodboards && p.roomMoodboards.length > 0) setRoomMoodboards(p.roomMoodboards);
+        if (p.overallMoodboard) setOverallMoodboard(p.overallMoodboard);
+        if (p.roomMoodboards && p.roomMoodboards.length > 0) {
+          setRoomMoodboards(p.roomMoodboards);
+          const prompts: Record<string, string> = {};
+          p.roomMoodboards.forEach((rm) => { if (rm.contextPrompt) prompts[rm.roomName] = rm.contextPrompt; });
+          setContextPrompts(prompts);
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [id]);
 
+  function targetRoomNames(): string[] {
+    if (!project?.analysis) return [];
+    const detected = project.analysis.rooms.map((r) => r.name);
+    const matched = KEY_ROOM_PATTERNS.filter((kr) =>
+      detected.some((dn) => dn.toLowerCase().includes(kr.toLowerCase()))
+    );
+    return matched.length > 0 ? matched : detected.slice(0, 4);
+  }
+
   async function generate() {
     setGenerating(true);
     setGlobalError(null);
-    setCurrentStep("Building overall style collage…");
+    setCurrentStep("Finding real interior photos for your style…");
 
-    const warmupTimer = setTimeout(() => setShowWarmup(true), 6000);
+    const warmupTimer = setTimeout(() => setShowWarmup(true), 8000);
+
+    const roomCount = targetRoomNames().length || 3;
+    const estimated = 4 + (roomCount * 4);
+    setTotalImages(estimated);
+    setImagesGenerated(0);
 
     try {
       const styleProfile: StyleProfile = { overallStyle, palette, budgetVibe, hardNo };
 
-      setCurrentStep("Generating overall moodboard…");
       const res = await fetch("/api/moodboards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: id, styleProfile }),
+        body: JSON.stringify({ projectId: id, styleProfile, contextPrompts }),
       });
 
       if (!res.ok) {
@@ -106,6 +132,7 @@ export default function MoodboardsPage() {
       const data = await res.json();
       setOverallMoodboard(data.overallMoodboard);
       setRoomMoodboards(data.roomMoodboards);
+      setImagesGenerated(estimated);
       setStyleSet(true);
       setProject((p) => p ? { ...p, status: "styled" } : p);
     } catch (err) {
@@ -126,7 +153,10 @@ export default function MoodboardsPage() {
       const res = await fetch("/api/moodboards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: id, styleProfile, rooms: [roomName] }),
+        body: JSON.stringify({
+          projectId: id, styleProfile, rooms: [roomName],
+          contextPrompts: { [roomName]: contextPrompts[roomName] ?? "" },
+        }),
       });
       if (!res.ok) throw new Error("Regeneration failed");
       const data = await res.json();
@@ -136,6 +166,25 @@ export default function MoodboardsPage() {
     } finally {
       clearTimeout(warmupTimer);
       setShowWarmup(false);
+    }
+  }
+
+  // Per-image regenerate: either a different real photo or an AI generation
+  async function regenerateImage(roomName: string, imageIndex: number, mode: "photo" | "ai") {
+    try {
+      const res = await fetch("/api/moodboards", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id, roomName, imageIndex, mode }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "Image regeneration failed");
+      }
+      const data = await res.json();
+      setRoomMoodboards(data.roomMoodboards);
+    } catch (err) {
+      setGlobalError(err instanceof Error ? err.message : "Image regeneration failed");
     }
   }
 
@@ -165,20 +214,35 @@ export default function MoodboardsPage() {
           Style & Moodboards
         </h1>
         <p className="text-stone-500 text-sm">
-          Set the interior direction, then we'll build an overall style collage and room-by-room moodboards with plan snippets.
+          We start from real, buildable interior photography matched to your style — the same workflow
+          most firms already use with Pinterest. Swap any image for another real photo, or regenerate
+          with AI for something more conceptual.
         </p>
       </div>
 
-      {/* Warmup notice */}
-      {showWarmup && (
-        <div className="mb-6 border border-amber-200 bg-amber-50 rounded-sm px-4 py-3 flex items-start gap-3">
-          <span className="text-amber-500 mt-0.5 flex-shrink-0">⏳</span>
-          <div>
-            <p className="text-sm text-amber-800 font-medium">Working on it…</p>
-            <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
-              Cropping plan snippets and preparing {roomMoodboards.length > 0 ? "additional" : ""} moodboards. This can take 10–20s.
-            </p>
+      {/* Progress banner */}
+      {generating && (
+        <div className="mb-6 border border-stone-200 bg-white rounded-sm px-5 py-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="spinner w-4 h-4 text-stone-500" style={{ borderWidth: 1.5 }} />
+              <p className="text-sm font-medium text-stone-700">{currentStep || "Generating…"}</p>
+            </div>
+            {totalImages > 0 && imagesGenerated > 0 && (
+              <span className="font-mono text-[10px] text-stone-400">{imagesGenerated} / {totalImages} images</span>
+            )}
           </div>
+          {totalImages > 0 && (
+            <div className="progress-bar">
+              <div className="progress-bar-fill transition-all duration-1000"
+                style={{ width: `${Math.max(5, (imagesGenerated / totalImages) * 100)}%` }} />
+            </div>
+          )}
+          {showWarmup && (
+            <p className="text-xs text-stone-400 leading-relaxed">
+              Searching real interior photography and generating AI fallbacks where needed — a few seconds per room.
+            </p>
+          )}
         </div>
       )}
 
@@ -186,8 +250,14 @@ export default function MoodboardsPage() {
       {globalError && (
         <div className="mb-6 border border-red-200 bg-red-50 rounded-sm px-4 py-3 flex items-start gap-3">
           <span className="text-red-400 mt-0.5">✕</span>
-          <div>
+          <div className="flex-1">
             <p className="text-sm text-red-700">{globalError}</p>
+            {globalError.includes("UNSPLASH_NOT_CONFIGURED") && (
+              <p className="text-xs text-red-500 mt-1">
+                Add <code className="bg-red-100 px-1 rounded">UNSPLASH_ACCESS_KEY</code> to .env.local —
+                free, instant, at <a href="https://unsplash.com/developers" target="_blank" rel="noreferrer" className="underline">unsplash.com/developers</a>.
+              </p>
+            )}
             <button onClick={() => setGlobalError(null)} className="font-mono text-[10px] text-red-400 mt-1 underline">Dismiss</button>
           </div>
         </div>
@@ -199,13 +269,11 @@ export default function MoodboardsPage() {
         {/* ── Style questionnaire ───────────────────────────────────────── */}
         <div className={`space-y-4 fade-up fade-up-2 ${hasResults ? "lg:col-span-1" : "lg:col-span-2"}`}>
 
-          {/* Overall style */}
           <div className="card p-4 space-y-3">
             <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">01 — Style</p>
             <div className="grid grid-cols-2 gap-1.5">
               {STYLE_OPTIONS.map((opt) => (
-                <button key={opt.value} type="button"
-                  disabled={generating}
+                <button key={opt.value} type="button" disabled={generating}
                   onClick={() => setOverallStyle(opt.value)}
                   className={`text-left p-2.5 border rounded-sm transition-all disabled:opacity-50 ${
                     overallStyle === opt.value ? "border-stone-900 bg-white" : "border-stone-200 hover:border-stone-400"
@@ -217,13 +285,11 @@ export default function MoodboardsPage() {
             </div>
           </div>
 
-          {/* Palette */}
           <div className="card p-4 space-y-3">
             <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">02 — Palette</p>
             <div className="space-y-1.5">
               {PALETTE_OPTIONS.map((opt) => (
-                <button key={opt.value} type="button"
-                  disabled={generating}
+                <button key={opt.value} type="button" disabled={generating}
                   onClick={() => setPalette(opt.value)}
                   className={`w-full flex items-center gap-2.5 p-2.5 border rounded-sm transition-all disabled:opacity-50 ${
                     palette === opt.value ? "border-stone-900 bg-white" : "border-stone-200 hover:border-stone-400"
@@ -238,13 +304,11 @@ export default function MoodboardsPage() {
             </div>
           </div>
 
-          {/* Budget */}
           <div className="card p-4 space-y-3">
             <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">03 — Budget</p>
             <div className="grid grid-cols-3 gap-1.5">
               {BUDGET_OPTIONS.map((opt) => (
-                <button key={opt.value} type="button"
-                  disabled={generating}
+                <button key={opt.value} type="button" disabled={generating}
                   onClick={() => setBudgetVibe(opt.value)}
                   className={`text-center p-2.5 border rounded-sm transition-all disabled:opacity-50 ${
                     budgetVibe === opt.value ? "border-stone-900 bg-white" : "border-stone-200 hover:border-stone-400"
@@ -255,7 +319,6 @@ export default function MoodboardsPage() {
             </div>
           </div>
 
-          {/* Hard no */}
           <div className="card p-4 space-y-2">
             <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">04 — Avoid</p>
             <textarea className="field-input text-sm resize-none" rows={2}
@@ -264,31 +327,53 @@ export default function MoodboardsPage() {
               disabled={generating} />
           </div>
 
-          {/* Generate button */}
+          {/* Per-room context prompts */}
+          {project.analysis && (
+            <div className="card p-4 space-y-3">
+              <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">05 — Room Context</p>
+              <p className="text-[10px] text-stone-400 leading-relaxed">
+                Optional — describe what you're picturing for each space, in your own words.
+              </p>
+              <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                {targetRoomNames().map((roomName) => (
+                  <div key={roomName}>
+                    <label className="font-mono text-[9px] uppercase tracking-wider text-stone-500 mb-1 block">
+                      {roomName}
+                    </label>
+                    <textarea
+                      className="field-input text-xs resize-none"
+                      rows={2}
+                      placeholder="e.g. reading nook by the window, warm wood tones, has two cats"
+                      value={contextPrompts[roomName] ?? ""}
+                      onChange={(e) => setContextPrompts((p) => ({ ...p, [roomName]: e.target.value }))}
+                      disabled={generating}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <button onClick={generate} disabled={generating} className="btn-primary w-full justify-center">
             {generating ? (
               <><span className="spinner" /><span>{currentStep || "Generating…"}</span></>
-            ) : hasResults
-              ? "↻ Regenerate All"
-              : "Generate Moodboards →"}
+            ) : hasResults ? "↻ Regenerate All" : "Generate Moodboards →"}
           </button>
         </div>
 
         {/* ── Results ───────────────────────────────────────────────────── */}
-        <div className={`space-y-10 fade-up fade-up-3 ${hasResults ? "lg:col-span-3" : "lg:col-span-3"}`}>
+        <div className="space-y-10 fade-up fade-up-3 lg:col-span-3">
 
-          {/* Empty state */}
           {!hasResults && !generating && (
             <div className="h-80 border border-dashed border-stone-200 rounded-sm flex flex-col items-center justify-center text-center p-12 space-y-3">
               <p className="font-mono text-xs text-stone-400 uppercase tracking-widest">Moodboards will appear here</p>
               <p className="text-xs text-stone-400 max-w-xs leading-relaxed">
-                Choose your style on the left, then click Generate Moodboards.
-                We'll create an overall style collage plus room-by-room references with plan snippets.
+                Choose your style on the left, optionally add room context, then click Generate Moodboards.
+                We'll find real interior photos matched to your brief, plus an overall style collage.
               </p>
             </div>
           )}
 
-          {/* Generating skeleton */}
           {generating && (
             <div className="space-y-8">
               <div className="space-y-3">
@@ -314,23 +399,22 @@ export default function MoodboardsPage() {
               <div className="flex items-center gap-3">
                 <div className="w-1 h-6 rounded-sm" style={{ backgroundColor: "var(--c-accent)" }} />
                 <div>
-                  <p className="font-mono text-xs uppercase tracking-widest text-stone-700">
-                    Overall Interior Style
-                  </p>
+                  <p className="font-mono text-xs uppercase tracking-widest text-stone-700">Overall Interior Style</p>
                   <p className="text-xs text-stone-400 mt-0.5 italic">{overallMoodboard.styleStatement}</p>
                 </div>
               </div>
 
-              {/* 2+2 grid collage */}
               <div className="grid grid-cols-2 gap-2">
                 {overallMoodboard.images.slice(0, 4).map((img, i) => (
-                  <div key={i} className="group relative overflow-hidden rounded-sm aspect-video">
-                    <img src={img.url} alt={img.caption}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                  <div key={i} className="group relative overflow-hidden rounded-sm aspect-video bg-stone-100">
+                    <img src={img.url} alt={img.caption} className="w-full h-full object-contain" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                     <span className="absolute bottom-2 left-3 font-mono text-[10px] text-white uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
                       {img.caption}
                     </span>
+                    {img.source === "unsplash" && img.photographer && (
+                      <PhotoAttribution photographer={img.photographer} photographerUrl={img.photographerUrl} sourceUrl={img.sourceUrl} />
+                    )}
                   </div>
                 ))}
               </div>
@@ -359,17 +443,15 @@ export default function MoodboardsPage() {
                   room={rm}
                   project={project}
                   onRegenerate={() => regenerateRoom(rm.roomName)}
+                  onRegenerateImage={(idx, mode) => regenerateImage(rm.roomName, idx, mode)}
                 />
               ))}
             </section>
           )}
 
-          {/* Continue CTA */}
           {hasResults && !generating && (
             <div className="flex justify-end pt-4 border-t border-stone-200">
-              <a href={`/project/${id}/export`} className="btn-primary">
-                Review & Export →
-              </a>
+              <a href={`/project/${id}/export`} className="btn-primary">Review & Export →</a>
             </div>
           )}
         </div>
@@ -381,13 +463,12 @@ export default function MoodboardsPage() {
 // ─── Room Section ─────────────────────────────────────────────────────────────
 
 function RoomSection({
-  room,
-  project,
-  onRegenerate,
+  room, project, onRegenerate, onRegenerateImage,
 }: {
   room: RoomMoodboard;
   project: Project;
   onRegenerate: () => void;
+  onRegenerateImage: (imageIndex: number, mode: "photo" | "ai") => void;
 }) {
   const [regenerating, setRegenerating] = useState(false);
   const roomDetail = project.analysis?.rooms.find((r) => r.name === room.roomName);
@@ -400,82 +481,75 @@ function RoomSection({
 
   return (
     <div className="space-y-4">
-      {/* Room header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <p className="font-mono text-sm uppercase tracking-widest text-stone-800 font-medium">
-            {room.roomName}
-          </p>
+          <p className="font-mono text-sm uppercase tracking-widest text-stone-800 font-medium">{room.roomName}</p>
           {roomDetail?.sizeEstimateSqm && (
             <span className="font-mono text-[10px] text-stone-400 border border-stone-200 px-2 py-0.5 rounded-sm">
               ~{roomDetail.sizeEstimateSqm} m²
             </span>
           )}
           {roomDetail?.orientation && (
-            <span className="font-mono text-[10px] text-stone-400 hidden sm:inline">
-              {roomDetail.orientation}
-            </span>
+            <span className="font-mono text-[10px] text-stone-400 hidden sm:inline">{roomDetail.orientation}</span>
           )}
         </div>
-        <button onClick={handleRegenerate} disabled={regenerating}
-          className="btn-ghost text-[10px]">
-          {regenerating ? <><span className="spinner w-3 h-3" style={{borderWidth:1}} /> Regenerating…</> : "↻ Regenerate"}
+        <button onClick={handleRegenerate} disabled={regenerating} className="btn-ghost text-[10px]">
+          {regenerating ? <><span className="spinner w-3 h-3" style={{borderWidth:1}} /> Regenerating…</> : "↻ Regenerate All"}
         </button>
       </div>
 
-      {/* Plan snippet + image grid */}
+      {room.contextPrompt && (
+        <p className="text-xs text-stone-500 italic bg-stone-50 border border-stone-100 rounded-sm px-3 py-2">
+          "{room.contextPrompt}"
+        </p>
+      )}
+
       <div className="grid grid-cols-4 gap-2 items-start">
 
-        {/* Plan snippet — col 1 */}
+        {/* Plan snippet */}
         <div className="col-span-1">
           <p className="font-mono text-[9px] text-stone-400 uppercase tracking-widest mb-1.5">Plan</p>
           {room.planSnippetUrl ? (
             <div className="border border-stone-200 rounded-sm overflow-hidden bg-white">
               <img src={room.planSnippetUrl} alt={`${room.roomName} plan`}
-                className="w-full object-contain"
-                style={{ imageRendering: "crisp-edges", maxHeight: "160px" }} />
+                className="w-full object-contain" style={{ imageRendering: "crisp-edges", maxHeight: "160px" }} />
               <div className="px-2 py-1.5 border-t border-stone-100">
                 <p className="font-mono text-[9px] text-stone-400 truncate">{room.roomName}</p>
-                {roomDetail?.sizeEstimateSqm && (
-                  <p className="font-mono text-[9px] text-stone-300">{roomDetail.sizeEstimateSqm} m²</p>
-                )}
+                {roomDetail?.sizeEstimateSqm && <p className="font-mono text-[9px] text-stone-300">{roomDetail.sizeEstimateSqm} m²</p>}
               </div>
             </div>
           ) : (
-            <div className="border border-dashed border-stone-200 rounded-sm flex items-center justify-center bg-stone-50 h-32">
-              <p className="font-mono text-[9px] text-stone-300 uppercase text-center px-2">Plan snippet unavailable</p>
+            <div className="border border-stone-200 rounded-sm overflow-hidden bg-white">
+              <img src={project.planImageUrl} alt="Full floor plan"
+                className="w-full object-contain" style={{ imageRendering: "crisp-edges", maxHeight: "160px" }} />
+              <div className="px-2 py-1.5 border-t border-stone-100">
+                <p className="font-mono text-[9px] text-stone-400">Full plan</p>
+                <p className="font-mono text-[9px] text-stone-300">{room.roomName} location not isolated</p>
+              </div>
             </div>
           )}
-
-          {/* Special features */}
           {roomDetail?.specialFeatures && roomDetail.specialFeatures.length > 0 && (
             <div className="mt-2 space-y-1">
               {roomDetail.specialFeatures.slice(0, 3).map((f) => (
-                <span key={f} className="block font-mono text-[9px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded-sm truncate">
-                  {f}
-                </span>
+                <span key={f} className="block font-mono text-[9px] text-stone-400 bg-stone-100 px-1.5 py-0.5 rounded-sm truncate">{f}</span>
               ))}
             </div>
           )}
         </div>
 
-        {/* Mood images — cols 2-4 */}
+        {/* Mood images */}
         <div className="col-span-3">
           <p className="font-mono text-[9px] text-stone-400 uppercase tracking-widest mb-1.5">Moodboard</p>
           <div className="grid grid-cols-3 gap-2">
             {room.images.slice(0, 3).map((img, i) => (
-              <MoodImageTile key={i} img={img} index={i} isHero={i === 0} />
+              <MoodImageTile key={i} img={img} index={i}
+                onRegenerate={(mode) => onRegenerateImage(i, mode)} />
             ))}
           </div>
-          {/* 4th image as a wide strip if present */}
           {room.images[3] && (
-            <div className="mt-2 group relative overflow-hidden rounded-sm" style={{ height: "80px" }}>
-              <img src={room.images[3].url} alt={room.images[3].caption}
-                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              <div className="absolute inset-0 bg-gradient-to-r from-black/40 to-transparent" />
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-[10px] text-white uppercase tracking-widest">
-                {room.images[3].caption}
-              </span>
+            <div className="mt-2">
+              <MoodImageTile img={room.images[3]} index={3} wide
+                onRegenerate={(mode) => onRegenerateImage(3, mode)} />
             </div>
           )}
         </div>
@@ -484,39 +558,110 @@ function RoomSection({
   );
 }
 
-// ─── Single mood image tile ───────────────────────────────────────────────────
+// ─── Single mood image tile (with per-image regenerate actions) ──────────────
 
 function MoodImageTile({
-  img, index, isHero,
+  img, index, wide, onRegenerate,
 }: {
-  img: { url: string; caption?: string };
+  img: MoodImage;
   index: number;
-  isHero: boolean;
+  wide?: boolean;
+  onRegenerate: (mode: "photo" | "ai") => void;
 }) {
-  const [loaded, setLoaded] = useState(false);
-  const [error,  setError]  = useState(false);
+  const [loaded, setLoaded]   = useState(false);
+  const [error, setError]     = useState(false);
+  const [busy, setBusy]       = useState<"photo" | "ai" | null>(null);
+
+  async function handleAction(mode: "photo" | "ai") {
+    setBusy(mode);
+    setLoaded(false);
+    await onRegenerate(mode);
+    setBusy(null);
+  }
 
   return (
-    <div className={`group relative overflow-hidden rounded-sm ${isHero ? "row-span-1" : ""}`}
-      style={{ aspectRatio: "4/3" }}>
+    <div className={`group relative overflow-hidden rounded-sm bg-stone-100 ${wide ? "" : ""}`}
+      style={wide ? { height: "110px" } : { aspectRatio: "4/3" }}>
       {!loaded && !error && <div className="absolute inset-0 skeleton" />}
+      {busy && (
+        <div className="absolute inset-0 bg-stone-900/60 flex items-center justify-center z-10">
+          <span className="spinner w-5 h-5 text-white" style={{ borderWidth: 2 }} />
+        </div>
+      )}
       {error ? (
         <div className="absolute inset-0 bg-stone-100 flex items-center justify-center">
           <p className="font-mono text-[9px] text-stone-300">Failed to load</p>
         </div>
       ) : (
         <img src={img.url} alt={img.caption ?? `Image ${index + 1}`}
-          className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-105 ${loaded ? "opacity-100" : "opacity-0"}`}
-          onLoad={() => setLoaded(true)}
-          onError={() => setError(true)} />
+          className={`w-full h-full object-contain transition-opacity duration-500 ${loaded ? "opacity-100" : "opacity-0"}`}
+          onLoad={() => setLoaded(true)} onError={() => setError(true)} />
       )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+
+      {/* Caption — bottom left, always visible on hover */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
       {img.caption && (
-        <span className="absolute bottom-2 left-2 font-mono text-[9px] text-white uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+        <span className="absolute bottom-2 left-2 font-mono text-[9px] text-white uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity drop-shadow z-0">
           {img.caption}
         </span>
       )}
+
+      {/* Photographer attribution — required by Unsplash API terms */}
+      {img.source === "unsplash" && img.photographer && (
+        <PhotoAttribution photographer={img.photographer} photographerUrl={img.photographerUrl} sourceUrl={img.sourceUrl} />
+      )}
+
+      {/* Source badge */}
+      <span className={`absolute top-2 left-2 font-mono text-[8px] uppercase tracking-widest px-1.5 py-0.5 rounded-sm opacity-0 group-hover:opacity-100 transition-opacity z-10 ${
+        img.source === "unsplash" ? "bg-white/90 text-stone-600" : "bg-amber-500/90 text-white"
+      }`}>
+        {img.source === "unsplash" ? "Real photo" : "AI concept"}
+      </span>
+
+      {/* Per-image action buttons — appear on hover */}
+      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <button
+          type="button"
+          onClick={() => handleAction("photo")}
+          disabled={!!busy}
+          title="Try a different real photo"
+          className="w-6 h-6 rounded-sm bg-white/90 hover:bg-white text-stone-600 flex items-center justify-center text-[10px] transition-colors"
+        >
+          🔀
+        </button>
+        <button
+          type="button"
+          onClick={() => handleAction("ai")}
+          disabled={!!busy}
+          title="Generate with AI instead"
+          className="w-6 h-6 rounded-sm bg-white/90 hover:bg-white text-stone-600 flex items-center justify-center text-[10px] transition-colors"
+        >
+          ✨
+        </button>
+      </div>
     </div>
+  );
+}
+
+// ─── Photographer attribution (Unsplash API requirement) ─────────────────────
+
+function PhotoAttribution({
+  photographer, photographerUrl, sourceUrl,
+}: {
+  photographer: string;
+  photographerUrl?: string;
+  sourceUrl?: string;
+}) {
+  return (
+    <a
+      href={photographerUrl ?? sourceUrl ?? "#"}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className="absolute bottom-1 right-1.5 font-mono text-[7px] text-white/70 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity z-10"
+    >
+      Photo: {photographer}
+    </a>
   );
 }
 
@@ -538,9 +683,7 @@ function PaletteSwatch({ palette }: { palette: Palette }) {
   };
   return (
     <div className="flex gap-0.5 flex-shrink-0">
-      {colors[palette].map((c, i) => (
-        <div key={i} className="w-3 h-6 rounded-sm" style={{ backgroundColor: c }} />
-      ))}
+      {colors[palette].map((c, i) => <div key={i} className="w-3 h-6 rounded-sm" style={{ backgroundColor: c }} />)}
     </div>
   );
 }
