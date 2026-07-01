@@ -173,9 +173,10 @@ async function analyzeWithClaude(
     body,
   });
 
-  const text = response.content
-    ?.filter((b: { type: string }) => b.type === "text")
-    .map((b: { text: string }) => b.text).join("");
+  const resp = response as { content?: Array<{ type: string; text?: string }> };
+  const text = resp.content
+    ?.filter((b) => b.type === "text")
+    .map((b) => b.text ?? "").join("");
   return parseAnalysisJson(text as string);
 }
 
@@ -613,7 +614,7 @@ async function generateWithPollinations(prompt: string, label: string): Promise<
 async function generateWithReplicate(room: RoomDetail, style: StyleProfile): Promise<string> {
   const prompt = buildMoodboardPrompt(room, style);
 
-  const prediction = await fetchJson(
+  const prediction = await fetchJson<{ urls?: { get?: string }; output?: string[] }>(
     "https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions",
     {
       method: "POST",
@@ -650,7 +651,7 @@ async function pollReplicateAndSave(pollUrl: string, roomName: string, maxAttemp
 // ── DALL-E 3 (paid fallback) ──────────────────────────────────────────────────
 
 async function generateWithDallE(room: RoomDetail, style: StyleProfile): Promise<string> {
-  const response = await fetchJson("https://api.openai.com/v1/images/generations", {
+  const response = await fetchJson<{ data?: Array<{ url?: string }> }>("https://api.openai.com/v1/images/generations", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
     body: JSON.stringify({
@@ -1275,7 +1276,8 @@ function parseStrengthsJson(text: string): string[] {
   }
 }
 
-async function fetchJson(url: string, opts: RequestInit = {}): Promise<Record<string, unknown>> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchJson(url: string, opts: RequestInit = {}): Promise<any> {
   const res = await fetch(url, opts);
   if (!res.ok) {
     const body = await res.text().catch(() => "");
