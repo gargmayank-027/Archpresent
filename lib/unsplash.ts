@@ -177,19 +177,52 @@ export function buildUnsplashQuery(
   // off-topic photos (e.g. kitchen photos appearing in a living room pool).
   // Each room term includes the PRIMARY furniture/element unique to that space.
   const roomTerms: Record<string, string> = {
-    "Living Room":     "living room sofa interior design",
-    "Kitchen":         "kitchen interior design",
-    "Master Bedroom":  "bedroom interior design",  // simplified — "master bedroom headboard bed pillows" returns 0 results on page 3+
-    "Bedroom 2":       "bedroom interior",
-    "Bedroom 3":       "bedroom interior design",
-    "Bedroom 4":       "bedroom interior",
-    "Bathroom":        "bathroom interior design",
-    "Master Bathroom": "bathroom interior design",
-    "Common Bathroom": "bathroom interior",
-    "Balcony":         "balcony terrace outdoor",
-    "Dining Room":     "dining room interior design",
-    "Study":           "home office interior",
-    "Pooja Room":      "prayer room interior",
+    // Principal spaces
+    "Living Room":        "living room sofa interior design",
+    "Drawing Room":       "living room interior design",
+    "Dining Room":        "dining room interior design",
+    "Dining Area":        "dining room interior design",
+    "Kitchen":            "kitchen interior design",
+    // Bedrooms
+    "Master Bedroom":     "bedroom interior design",
+    "Bedroom 2":          "bedroom interior",
+    "Bedroom 3":          "bedroom interior design",
+    "Bedroom 4":          "bedroom interior",
+    "Maid's Room":        "small bedroom interior",
+    "Driver's Room":      "small bedroom interior",
+    // Bathrooms & powder rooms
+    "Master Bathroom":    "bathroom interior design",
+    "Attached Bathroom":  "bathroom interior design",
+    "Common Bathroom":    "bathroom interior",
+    "Bathroom":           "bathroom interior design",
+    "Powder Room":        "powder room half bath interior",
+    "Ensuite":            "ensuite bathroom interior",
+    "Toilet":             "bathroom interior design",
+    // Dressing & wardrobe
+    "Dressing Room":      "dressing room walk in wardrobe interior",
+    "Walk-in Wardrobe":   "walk in wardrobe closet interior",
+    "WIC":                "walk in closet interior design",
+    "WIW":                "walk in wardrobe interior design",
+    // Outdoor
+    "Balcony":            "balcony terrace outdoor",
+    "Terrace":            "terrace rooftop outdoor interior",
+    "Deck":               "outdoor deck terrace design",
+    "Sit-out":            "outdoor sitting area garden",
+    "Front Lawn":         "garden landscape outdoor",
+    "Porch":              "porch entrance exterior",
+    // Special
+    "Pooja Room":         "prayer room interior",
+    "Study":              "home office interior",
+    "Home Office":        "home office desk interior",
+    "Library":            "home library bookshelf interior",
+    "Gym":                "home gym interior design",
+    // Utility
+    "Utility Room":       "laundry room interior",
+    "Laundry Area":       "laundry room interior design",
+    // Lobby / Entry
+    "Lobby":              "entrance foyer interior design",
+    "Foyer":              "entrance foyer interior design",
+    "Entry Hall":         "entrance hall interior design",
   };
 
   // Image angle suffixes — kept very short to avoid over-constraining the search.

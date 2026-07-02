@@ -1096,6 +1096,7 @@ Analyse the floor plan image and return a single JSON object matching EXACTLY th
       "adjacentRooms": string[],
       "specialFeatures": string[],
       "furnitureHints": string[],
+      "moodboardWorthy": boolean,
       "boundingBox": {
         "x": number,
         "y": number,
@@ -1113,9 +1114,20 @@ Analyse the floor plan image and return a single JSON object matching EXACTLY th
 }
 
 Rules:
-- Identify ALL rooms visible including bathrooms, store rooms, balconies
+- Identify EVERY distinct space visible in the plan — be exhaustive:
+  Principal spaces: Living Room, Drawing Room, Dining Area, Kitchen, Bedrooms
+  Sub-spaces: Dressing Room, Walk-in Wardrobe (WIC/WIW), Attached Bathroom,
+    Master Bathroom, Common Bathroom, Powder Room (half-bath), Ensuite,
+    Utility Room, Store Room, Laundry Area, Maid's Room, Driver's Room
+  Circulation: Lobby, Foyer, Entry Hall, Corridor, Passage, Staircase Area
+  Outdoor: Balcony, Terrace, Deck, Sit-out, Garden, Porch, Front Lawn
+  Special: Pooja Room, Study, Home Office, AV Room, Gym, Library
+- Include each space as a separate room entry — do not merge sub-spaces
 - Estimate sizes from furniture scale and typical proportions
 - adjacentRooms must use exact same names as in rooms array
+- Set "moodboardWorthy": true for spaces with distinct interior character
+  (bedrooms, living, kitchen, bathrooms, balconies, dressing rooms).
+  Set false for purely functional spaces (corridors, staircases, utility rooms).
 - boundingBox: REQUIRED for every room. Estimate normalised 0.0-1.0 coordinates
   of where this room sits within the floor plan image.
   x,y = top-left corner, width/height = extent. Origin (0,0) is top-left of the image.

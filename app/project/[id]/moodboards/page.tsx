@@ -32,8 +32,6 @@ const BUDGET_OPTIONS: { value: BudgetVibe; label: string }[] = [
 ];
 
 // Rooms we always try to generate moodboards for
-const KEY_ROOM_PATTERNS = ["Living Room", "Kitchen", "Master Bedroom", "Bedroom 2", "Bedroom 3", "Balcony"];
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function MoodboardsPage() {
@@ -56,6 +54,8 @@ export default function MoodboardsPage() {
 
   // Per-room plain-English context prompts (optional)
   const [contextPrompts, setContextPrompts] = useState<Record<string, string>>({});
+  // Room selection — which rooms to include in moodboard generation
+  const [selectedRooms, setSelectedRooms]   = useState<Record<string, boolean>>({});
 
   // Results
   const [overallMoodboard, setOverallMoodboard] = useState<OverallMoodboard | null>(null);
@@ -91,18 +91,43 @@ export default function MoodboardsPage() {
           p.roomMoodboards.forEach((rm) => { if (rm.contextPrompt) prompts[rm.roomName] = rm.contextPrompt; });
           setContextPrompts(prompts);
         }
+        // Initialise room selection from analysis
+        if (p.analysis?.rooms) {
+          initRoomSelection(p.analysis.rooms);
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
   }, [id]);
 
-  function targetRoomNames(): string[] {
+  // All rooms detected in the plan, sorted by moodboardWorthy first
+  function allDetectedRooms() {
     if (!project?.analysis) return [];
-    const detected = project.analysis.rooms.map((r) => r.name);
-    const matched = KEY_ROOM_PATTERNS.filter((kr) =>
-      detected.some((dn) => dn.toLowerCase().includes(kr.toLowerCase()))
-    );
-    return matched.length > 0 ? matched : detected.slice(0, 4);
+    return [...project.analysis.rooms].sort((a, b) => {
+      const aw = (a as { moodboardWorthy?: boolean }).moodboardWorthy !== false ? 0 : 1;
+      const bw = (b as { moodboardWorthy?: boolean }).moodboardWorthy !== false ? 0 : 1;
+      return aw - bw;
+    });
+  }
+
+  // Which rooms the architect has selected (defaults to moodboardWorthy ones)
+  function targetRoomNames(): string[] {
+    const all = allDetectedRooms();
+    if (all.length === 0) return [];
+    // If none explicitly selected yet, default to moodboardWorthy rooms
+    const explicitlySelected = Object.keys(selectedRooms).filter((k) => selectedRooms[k]);
+    if (explicitlySelected.length > 0) return explicitlySelected;
+    const worthy = all.filter((r) => (r as { moodboardWorthy?: boolean }).moodboardWorthy !== false);
+    return worthy.length > 0 ? worthy.map((r) => r.name) : all.slice(0, 5).map((r) => r.name);
+  }
+
+  // Initialize selectedRooms when project analysis loads
+  function initRoomSelection(rooms: typeof project.analysis.rooms) {
+    const init: Record<string, boolean> = {};
+    rooms.forEach((r) => {
+      init[r.name] = (r as { moodboardWorthy?: boolean }).moodboardWorthy !== false;
+    });
+    setSelectedRooms(init);
   }
 
   async function generate() {
@@ -210,6 +235,10 @@ export default function MoodboardsPage() {
       const data = await res.json();
       // Update project with fresh analysis (includes new boundingBox data)
       setProject((p) => p ? { ...p, analysis: data.analysis, status: "analyzed" } : p);
+      // Re-initialise room selection with the new (deeper) room list
+      if (data.analysis?.rooms) {
+        initRoomSelection(data.analysis.rooms);
+      }
       setGlobalError(null);
     } catch (err) {
       const isTimeout = err instanceof Error && err.name === "AbortError";
@@ -360,30 +389,74 @@ export default function MoodboardsPage() {
               disabled={generating} />
           </div>
 
-          {/* Per-room context prompts */}
-          {project.analysis && (
+          {/* Room selector + per-room context prompts */}
+          {project.analysis && project.analysis.rooms.length > 0 && (
             <div className="card p-4 space-y-3">
-              <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">05 — Room Context</p>
-              <p className="text-[10px] text-stone-400 leading-relaxed">
-                Optional — describe what you're picturing for each space, in your own words.
-              </p>
-              <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-                {targetRoomNames().map((roomName) => (
-                  <div key={roomName}>
-                    <label className="font-mono text-[9px] uppercase tracking-wider text-stone-500 mb-1 block">
-                      {roomName}
-                    </label>
-                    <textarea
-                      className="field-input text-xs resize-none"
-                      rows={2}
-                      placeholder="e.g. reading nook by the window, warm wood tones, has two cats"
-                      value={contextPrompts[roomName] ?? ""}
-                      onChange={(e) => setContextPrompts((p) => ({ ...p, [roomName]: e.target.value }))}
-                      disabled={generating}
-                    />
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">05 — Spaces</p>
+                <div className="flex gap-2">
+                  <button type="button"
+                    className="font-mono text-[9px] text-stone-400 hover:text-stone-600 underline"
+                    onClick={() => { const a: Record<string, boolean> = {}; allDetectedRooms().forEach((r) => { a[r.name] = true; }); setSelectedRooms(a); }}>
+                    All
+                  </button>
+                  <button type="button"
+                    className="font-mono text-[9px] text-stone-400 hover:text-stone-600 underline"
+                    onClick={() => { const a: Record<string, boolean> = {}; allDetectedRooms().forEach((r) => { a[r.name] = false; }); setSelectedRooms(a); }}>
+                    None
+                  </button>
+                </div>
               </div>
+              <p className="text-[10px] text-stone-400 leading-relaxed">
+                Select spaces to include. Add a brief for any space you want to personalise.
+              </p>
+              <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+                {allDetectedRooms().map((room) => {
+                  const isWorthy = (room as any).moodboardWorthy !== false;
+                  const isSelected = selectedRooms[room.name] ?? isWorthy;
+                  return (
+                    <div key={room.name} className={`border rounded-sm transition-all ${isSelected ? "border-stone-300 bg-white" : "border-stone-100 bg-stone-50 opacity-50"}`}>
+                      <label className="flex items-start gap-2.5 p-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => setSelectedRooms((p) => ({ ...p, [room.name]: e.target.checked }))}
+                          disabled={generating}
+                          className="mt-0.5 accent-stone-800 flex-shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-[10px] uppercase tracking-wider text-stone-700 font-medium">{room.name}</span>
+                            {room.sizeEstimateSqm && (
+                              <span className="font-mono text-[9px] text-stone-400">~{room.sizeEstimateSqm}m²</span>
+                            )}
+                            {room.orientation && (
+                              <span className="font-mono text-[9px] text-stone-400">{room.orientation}</span>
+                            )}
+                            {!isWorthy && (
+                              <span className="font-mono text-[8px] text-stone-300 border border-stone-200 px-1 rounded-sm">utility</span>
+                            )}
+                          </div>
+                          {isSelected && (
+                            <textarea
+                              className="field-input text-[11px] resize-none mt-1.5 w-full"
+                              rows={1}
+                              placeholder="Optional brief, e.g. warm wood tones, statement ceiling…"
+                              value={contextPrompts[room.name] ?? ""}
+                              onChange={(e) => setContextPrompts((p) => ({ ...p, [room.name]: e.target.value }))}
+                              disabled={generating}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
+                        </div>
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="font-mono text-[9px] text-stone-400">
+                {targetRoomNames().length} space{targetRoomNames().length !== 1 ? "s" : ""} selected for moodboard
+              </p>
             </div>
           )}
 

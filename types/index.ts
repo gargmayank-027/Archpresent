@@ -216,6 +216,7 @@ export interface RoomDetail extends RoomSummary {
   adjacentRooms?: string[];    // rooms it connects to
   specialFeatures?: string[];  // "walk-in wardrobe", "attached bath", "double height"
   furnitureHints?: string[];   // furniture visible in plan: "L-sofa", "island counter"
+  moodboardWorthy?: boolean;   // true for spaces with interior design potential
   boundingBox?: RoomBoundingBox; // real plan coordinates, if known — enables accurate crop
 }
 
