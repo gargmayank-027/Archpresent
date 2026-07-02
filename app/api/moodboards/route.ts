@@ -105,8 +105,18 @@ export async function POST(req: NextRequest) {
     const generated: RoomMoodboard[] = [];
 
     for (const [roomIdx, roomName] of targetNames.entries()) {
+      // Fuzzy match room name — Groq/Gemini may return slightly different names
+      // (e.g. "Bed Room" vs "Bedroom 2") so we try exact match first, then partial.
       const roomDetail =
-        detectedRooms.find((r) => r.name === roomName) ?? { name: roomName };
+        detectedRooms.find((r) => r.name === roomName) ??
+        detectedRooms.find((r) =>
+          r.name.toLowerCase().replace(/\s+/g, "") === roomName.toLowerCase().replace(/\s+/g, "")
+        ) ??
+        detectedRooms.find((r) =>
+          r.name.toLowerCase().includes(roomName.toLowerCase().split(" ")[0]) ||
+          roomName.toLowerCase().includes(r.name.toLowerCase().split(" ")[0])
+        ) ??
+        { name: roomName };
       const contextPrompt = contextPrompts?.[roomName]?.trim() || undefined;
 
       // Pass roomIdx so each room fetches from a different Unsplash page offset,
@@ -188,7 +198,13 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: `Room "${roomName}" not found` }, { status: 404 });
     }
 
-    const roomDetail = (project.analysis?.rooms.find((r) => r.name === roomName) ?? { name: roomName }) as RoomDetail;
+    const analysisRooms = project.analysis?.rooms ?? [];
+    const roomDetail = (
+      analysisRooms.find((r) => r.name === roomName) ??
+      analysisRooms.find((r) => r.name.toLowerCase().replace(/\s/g, "") === roomName.toLowerCase().replace(/\s/g, "")) ??
+      analysisRooms.find((r) => r.name.toLowerCase().includes(roomName.toLowerCase().split(" ")[0])) ??
+      { name: roomName }
+    ) as RoomDetail;
     const styleProfile = project.styleProfile;
     if (!styleProfile) {
       return NextResponse.json({ error: "No style profile set for this project" }, { status: 400 });

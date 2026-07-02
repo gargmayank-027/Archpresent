@@ -153,7 +153,7 @@ async function analyzeWithGemini(
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) {
-          const waitMs = 8000; // wait 8s once then give up
+          const waitMs = 2000; // wait 2s then give up — Groq is the real fallback
           console.log(`[ai] Gemini 429 — waiting ${waitMs/1000}s before retry…`);
           await delay(waitMs);
         }
@@ -440,7 +440,7 @@ async function generateStrengthsGemini(
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        if (attempt > 0) await delay(8000);
+        if (attempt > 0) await delay(2000); // fail fast — Groq handles the fallback
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_AI_KEY}`;
         console.log(`[ai] Strengths: trying ${model} (attempt ${attempt + 1})`);
         const response = await fetchJson(url, {

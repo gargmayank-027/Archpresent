@@ -32,16 +32,23 @@ export async function cropRoomFromPlan(
   try {
     const mod = await import("sharp");
     sharpFn = (mod.default ?? mod) as typeof sharpFn;
+    console.log(`[planCrop] Sharp available for ${roomName}`);
   } catch {
-    return null; // sharp not available — skip cropping
+    console.warn(`[planCrop] Sharp not available — cannot crop ${roomName}`);
+    return null;
   }
 
   try {
     let inputBuffer: Buffer;
     if (planImagePath.startsWith("http")) {
+      console.log(`[planCrop] Fetching plan image for ${roomName}: ${planImagePath.slice(0, 80)}…`);
       const res = await fetch(planImagePath);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn(`[planCrop] Image fetch failed for ${roomName}: HTTP ${res.status}`);
+        return null;
+      }
       inputBuffer = Buffer.from(await res.arrayBuffer());
+      console.log(`[planCrop] Image downloaded: ${(inputBuffer.length/1024).toFixed(0)}KB`);
     } else {
       const { readFileSync, existsSync } = await import("fs");
       if (!existsSync(planImagePath)) return null;

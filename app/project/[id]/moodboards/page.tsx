@@ -145,10 +145,23 @@ export default function MoodboardsPage() {
     try {
       const styleProfile: StyleProfile = { overallStyle, palette, budgetVibe, hardNo };
 
+      // Pass the architect's room selection explicitly so the API uses exactly
+      // these rooms, not the hardcoded KEY_ROOMS fallback list.
+      const selectedRoomNames = targetRoomNames();
+      const selectedContextPrompts: Record<string, string> = {};
+      selectedRoomNames.forEach((r) => {
+        if (contextPrompts[r]) selectedContextPrompts[r] = contextPrompts[r];
+      });
+
       const res = await fetch("/api/moodboards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: id, styleProfile, contextPrompts }),
+        body: JSON.stringify({
+          projectId: id,
+          styleProfile,
+          rooms: selectedRoomNames,
+          contextPrompts: selectedContextPrompts,
+        }),
       });
 
       if (!res.ok) {
