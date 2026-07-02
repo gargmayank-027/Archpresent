@@ -41,12 +41,6 @@ export async function analyzePlanImage(
   planImageUrl: string,
   plotInfo?: PlotInfo
 ): Promise<PlanAnalysis> {
-  // STUB MODE — comment this block out and uncomment below to use real AI
-  console.log("[ai] Running in stub mode — using realistic demo analysis");
-  void planImageUrl;
-  return analyzeStub(plotInfo);
-
-  /* REAL AI — uncomment to activate (requires API key in .env.local)
   if (process.env.GOOGLE_AI_KEY) {
     return analyzeWithGemini(planImageUrl, plotInfo);
   }
@@ -56,8 +50,8 @@ export async function analyzePlanImage(
   if (process.env.OPENAI_API_KEY) {
     return analyzeWithGPT4o(planImageUrl, plotInfo);
   }
+  console.log("[ai] No AI key configured — using stub analysis. Set GOOGLE_AI_KEY in environment variables.");
   return analyzeStub(plotInfo);
-  */
 }
 
 // ── Google Gemini 1.5 Flash (FREE) ───────────────────────────────────────────
@@ -222,15 +216,10 @@ export async function generatePlanStrengths(
   analysis: PlanAnalysis,
   plotInfo?: PlotInfo
 ): Promise<string[]> {
-  // STUB MODE
-  return strengthsStub(analysis, plotInfo);
-
-  /* REAL AI — uncomment to activate
   if (process.env.GOOGLE_AI_KEY) return generateStrengthsGemini(analysis, plotInfo);
   if (process.env.ANTHROPIC_API_KEY) return generateStrengthsClaude(analysis, plotInfo);
   if (process.env.OPENAI_API_KEY) return generateStrengthsGPT(analysis, plotInfo);
   return strengthsStub(analysis, plotInfo);
-  */
 }
 
 async function generateStrengthsGemini(
