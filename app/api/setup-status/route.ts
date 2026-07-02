@@ -12,6 +12,7 @@ export const runtime = "nodejs";
 export async function GET() {
   return NextResponse.json({
     gemini:       process.env.GOOGLE_AI_KEY        ? "ok" : "missing",
+    groq:         process.env.GROQ_API_KEY          ? "ok" : "missing", // free fallback for plan analysis
     unsplash:     process.env.UNSPLASH_ACCESS_KEY  ? "ok" : "missing", // first-draft real photos
     // "ok" if a key is set (reliable), "unkeyed" if relying on the shared
     // anonymous queue (works, but may hit transient "queue full" errors)

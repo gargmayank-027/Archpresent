@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 interface ProviderStatus {
   gemini:       "ok" | "missing";
+  groq:         "ok" | "missing";
   unsplash:     "ok" | "missing";
   pollinations: "ok" | "unkeyed";
   anthropic:    "ok" | "missing";
@@ -45,6 +46,7 @@ export default function SetupPage() {
           <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">Current Status</p>
           <div className="grid grid-cols-2 gap-2">
             <StatusRow label="Gemini Flash (analysis)"     ok={status.gemini === "ok"}       free />
+            <StatusRow label="Groq / Llama 4 Scout (fallback)" ok={(status as any).groq === "ok"} free />
             <StatusRow label="Unsplash (real photos)"      ok={status.unsplash === "ok"}     free />
             <StatusRow label="Pollinations.ai (AI images)" ok={status.pollinations === "ok"} free
               hint={status.pollinations === "unkeyed" ? "working, unkeyed" : undefined} />
@@ -74,9 +76,27 @@ export default function SetupPage() {
         note="50 requests/hour on the free tier. Each room load uses one request; results are cached for 5 minutes. Without this key, the app generates AI images instead of real photos as the first draft."
       />
 
-      {/* Step 2 — Gemini */}
+      {/* Step 2 — Groq (free fallback for when Gemini hits rate limits) */}
       <SetupStep
         num="02"
+        title="Groq — Free AI Fallback (Recommended)"
+        badge="Free · 14,400 req/day"
+        badgeColor="bg-green-100 text-green-700"
+        steps={[
+          { label: "Go to", link: { text: "console.groq.com", url: "https://console.groq.com" } },
+          { label: "Sign in with Google or GitHub (no credit card needed)" },
+          { label: "Go to API Keys → Create API Key" },
+          { label: 'Copy the key (starts with gsk_)' },
+          { label: 'Add to Vercel environment variables:', code: "GROQ_API_KEY=gsk_..." },
+          { label: "Redeploy — Groq is now the automatic fallback when Gemini rate-limits" },
+        ]}
+        what="Groq runs Llama 4 Scout Vision on custom chips — genuinely free, no credit card, 14,400 requests/day. When Gemini hits its 15 req/min limit (which happens if you click Re-analyse quickly), the app automatically falls back to Groq instead of showing an error."
+        note="Gemini → Groq → Claude → GPT-4o: each provider is tried automatically when the previous one rate-limits. With both Gemini and Groq set, you're covered for virtually any usage pattern."
+      />
+
+      {/* Step 3 — Gemini */}
+      <SetupStep
+        num="03"
         title="Google Gemini Flash — Plan Analysis"
         badge="Free · 1,500 req/day"
         badgeColor="bg-green-100 text-green-700"
@@ -94,7 +114,7 @@ export default function SetupPage() {
       <div className="card p-6 space-y-4 mb-5 fade-up fade-up-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <span className="font-mono text-xl text-stone-200 leading-none">03</span>
+            <span className="font-mono text-xl text-stone-200 leading-none">04</span>
             <div>
               <p className="font-mono text-xs uppercase tracking-widest text-stone-700">
                 Pollinations.ai — AI-Generated Alternative

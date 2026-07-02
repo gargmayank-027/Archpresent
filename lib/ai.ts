@@ -16,12 +16,17 @@
  *   4. Stub (Unsplash placeholder) [only if every provider above fails]
  *
  * Set in .env.local:
- *   GOOGLE_AI_KEY=...           ← get free at aistudio.google.com
- *   POLLINATIONS_API_KEY=pk_... ← optional but recommended, free at enter.pollinations.ai
- *                                  (without it, requests share an overloaded public queue
- *                                  and may need retries — we handle that automatically)
+ *   GOOGLE_AI_KEY=...           ← get free at aistudio.google.com (15 req/min)
+ *   GROQ_API_KEY=gsk_...        ← get free at console.groq.com (no credit card!)
+ *                                  30k tokens/min, 14.4k req/day free
+ *                                  Used as fallback if Gemini is rate-limited
+ *   POLLINATIONS_API_KEY=pk_... ← optional, free at enter.pollinations.ai
  *
- * Paid fallbacks (optional, only used if Pollinations is unreachable):
+ * Fallback order for plan analysis:
+ *   Gemini Flash → Groq Llama 4 Scout → Claude → GPT-4o → stub
+ *   (each tier is tried automatically if the previous is rate-limited)
+ *
+ * Paid fallbacks (optional):
  *   ANTHROPIC_API_KEY / OPENAI_API_KEY / REPLICATE_API_TOKEN
  */
 
@@ -58,6 +63,20 @@ export async function analyzePlanImage(
     }
   }
 
+  if (process.env.GROQ_API_KEY) {
+    try {
+      console.log("[ai] Using Groq (Llama 4 Scout) as fallback for plan analysis");
+      return await analyzeWithGroq(planImageUrl, plotInfo);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("429") || msg.includes("rate limit")) {
+        console.warn("[ai] Groq rate-limited — trying next provider…");
+      } else {
+        throw err;
+      }
+    }
+  }
+
   if (process.env.ANTHROPIC_API_KEY) {
     try {
       console.log("[ai] Using Claude as fallback for plan analysis");
@@ -86,7 +105,7 @@ export async function analyzePlanImage(
     }
   }
 
-  if (process.env.GOOGLE_AI_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY) {
+  if (process.env.GOOGLE_AI_KEY || process.env.GROQ_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY) {
     throw new Error("All AI providers are currently rate-limited. Please wait 60 seconds and try again.");
   }
 
@@ -179,6 +198,108 @@ async function analyzeWithGemini(
 
 // ── Anthropic Claude (paid fallback) ─────────────────────────────────────────
 
+// ── Groq — Llama 4 Scout Vision (FREE, no credit card) ───────────────────────
+//
+// Groq's free tier: 30,000 tokens/minute, 14,400 req/day, no credit card needed
+// Vision model: meta-llama/llama-4-scout-17b-16e-instruct
+// API is OpenAI-compatible — same format as GPT-4o vision
+// Setup: console.groq.com → API Keys → Create key (30 seconds)
+// Add to Vercel: GROQ_API_KEY=gsk_...
+
+const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+const GROQ_TEXT_MODEL   = "llama-3.3-70b-versatile"; // for strengths (text only)
+const GROQ_BASE_URL     = "https://api.groq.com/openai/v1";
+
+async function analyzeWithGroq(
+  planImageUrl: string,
+  plotInfo?: PlotInfo
+): Promise<PlanAnalysis> {
+  console.log("[ai] analyzeWithGroq — downloading image for Groq");
+
+  // Groq vision requires base64 — download the image first
+  let base64Image: string;
+  let mimeType = "image/png";
+  try {
+    const imageRes = await fetch(planImageUrl);
+    if (!imageRes.ok) throw new Error(`Image download failed: ${imageRes.status}`);
+    const arrayBuf = await imageRes.arrayBuffer();
+    base64Image = Buffer.from(arrayBuf).toString("base64");
+    const ct = imageRes.headers.get("content-type") ?? "image/png";
+    mimeType = ct.startsWith("image/") ? ct : "image/png";
+  } catch (err) {
+    throw new Error(`Failed to download plan image for Groq: ${err}`);
+  }
+
+  const prompt = buildAnalysisSystemPrompt(plotInfo);
+
+  const body = JSON.stringify({
+    model: GROQ_VISION_MODEL,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "text", text: prompt },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+      ],
+    }],
+    max_tokens: 4096,
+    temperature: 0.2,
+    response_format: { type: "json_object" },
+  });
+
+  const res = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+    },
+    body,
+  });
+
+  if (res.status === 429) {
+    throw new Error("429 Groq rate limited");
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Groq HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content ?? "{}";
+  console.log("[ai] Groq analysis complete");
+  return parseAnalysisJson(text);
+}
+
+async function generateStrengthsGroq(
+  analysis: PlanAnalysis,
+  plotInfo?: PlotInfo
+): Promise<string[]> {
+  const prompt = buildStrengthsPrompt(analysis, plotInfo);
+
+  const res = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_TEXT_MODEL,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 1024,
+      temperature: 0.7,
+    }),
+  });
+
+  if (res.status === 429) throw new Error("429 Groq rate limited");
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Groq HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const text = data.choices?.[0]?.message?.content ?? "[]";
+  return parseStrengthsJson(text);
+}
+
 async function analyzeWithClaude(
   planImageUrl: string,
   plotInfo?: PlotInfo
@@ -263,6 +384,16 @@ export async function generatePlanStrengths(
       const msg = String(err);
       if (msg.includes("429") || msg.includes("QUOTA_EXHAUSTED") || msg.includes("rate limit")) {
         console.warn("[ai] Gemini rate-limited for strengths — trying fallback…");
+      } else { throw err; }
+    }
+  }
+  if (process.env.GROQ_API_KEY) {
+    try {
+      return await generateStrengthsGroq(analysis, plotInfo);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("429") || msg.includes("rate limit")) {
+        console.warn("[ai] Groq rate-limited for strengths — trying next…");
       } else { throw err; }
     }
   }
