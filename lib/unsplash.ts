@@ -211,7 +211,10 @@ export function buildUnsplashQuery(
     "Front Lawn":         "garden landscape outdoor",
     "Porch":              "porch entrance exterior",
     // Special
-    "Pooja Room":         "prayer room interior",
+    // "prayer room" alone is too ambiguous on a Western stock library like
+    // Unsplash — it returns churches/chapels (pews, crosses) rather than a
+    // Hindu home shrine. Naming the actual object (mandir) disambiguates it.
+    "Pooja Room":         "hindu mandir home temple shrine wood",
     "Study":              "home office interior",
     "Home Office":        "home office desk interior",
     "Library":            "home library bookshelf interior",

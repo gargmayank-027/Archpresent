@@ -41,11 +41,24 @@ export async function enhancePlanImage(
     }
 
     const ext = planImagePath.split(".").pop()?.toLowerCase() ?? "";
-    if (ext === "pdf") {
-      return { originalUrl, enhancedUrl: originalUrl, enhancedDiskPath: planImagePath, processingNotes: ["PDF — enhancement skipped"] };
-    }
-
     const notes: string[] = [];
+
+    if (ext === "pdf") {
+      // Rasterise the PDF to a PNG first — without this, planImagePath stays
+      // a .pdf forever, and lib/planCrop.ts unconditionally refuses to crop
+      // PDF sources. That silently disabled room cropping for every PDF-
+      // uploaded plan (the "plans not getting cropped" bug).
+      try {
+        const rasterised = await sharpFn!(inputBuffer, { pages: 1, density: 200 })
+          .png()
+          .toBuffer();
+        notes.push("PDF rasterised to PNG (200dpi)");
+        inputBuffer = rasterised;
+      } catch (err) {
+        console.error("[enhance] PDF rasterisation failed:", err);
+        return { originalUrl, enhancedUrl: originalUrl, enhancedDiskPath: planImagePath, processingNotes: ["PDF rasterisation failed — raw PDF used, cropping unavailable"] };
+      }
+    }
     const meta  = await sharpFn!(inputBuffer).metadata();
     const { width = 1000, height = 1000 } = meta;
     notes.push(`Input: ${width}×${height}px ${ext.toUpperCase()}`);

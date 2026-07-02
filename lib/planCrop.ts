@@ -26,9 +26,7 @@ export async function cropRoomFromPlan(
   // No real coordinates known — don't guess. Caller shows full plan instead.
   if (!boundingBox) return null;
 
-  if (planImagePath.toLowerCase().endsWith(".pdf")) return null;
-
-  let sharpFn: ((input: Buffer) => import("sharp").Sharp) | null = null;
+  let sharpFn: ((input: Buffer, opts?: object) => import("sharp").Sharp) | null = null;
   try {
     const mod = await import("sharp");
     sharpFn = (mod.default ?? mod) as typeof sharpFn;
@@ -53,6 +51,20 @@ export async function cropRoomFromPlan(
       const { readFileSync, existsSync } = await import("fs");
       if (!existsSync(planImagePath)) return null;
       inputBuffer = readFileSync(planImagePath);
+    }
+
+    // Defensive fallback: normally lib/enhance.ts rasterises PDFs to PNG
+    // before this ever runs, so planImagePath shouldn't be a .pdf here. But
+    // if enhancement was disabled/failed, rasterise on the fly rather than
+    // silently refusing to crop.
+    if (planImagePath.toLowerCase().endsWith(".pdf")) {
+      try {
+        inputBuffer = await sharpFn!(inputBuffer, { pages: 1, density: 200 }).png().toBuffer();
+        console.log(`[planCrop] Rasterised PDF on the fly for ${roomName}`);
+      } catch (err) {
+        console.warn(`[planCrop] Could not rasterise PDF for ${roomName}:`, err);
+        return null;
+      }
     }
 
     const meta = await sharpFn!(inputBuffer).metadata();

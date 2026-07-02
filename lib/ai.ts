@@ -34,7 +34,7 @@ import fs from "fs";
 import https from "https";
 import http from "http";
 import path from "path";
-import type { PlanAnalysis, PlotInfo, RoomDetail, StyleProfile, MoodImage, RoomMoodboard, OverallMoodboard } from "@/types";
+import type { PlanAnalysis, PlotInfo, RoomDetail, StyleProfile, MoodImage, RoomMoodboard, OverallMoodboard, RoomBoundingBox } from "@/types";
 import { saveUploadedFile } from "@/lib/store";
 import { searchUnsplashPhotos, getReplacementPhoto, buildUnsplashQuery } from "@/lib/unsplash";
 
@@ -43,6 +43,14 @@ import { searchUnsplashPhotos, getReplacementPhoto, buildUnsplashQuery } from "@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function analyzePlanImage(
+  planImageUrl: string,
+  plotInfo?: PlotInfo
+): Promise<PlanAnalysis> {
+  const analysis = await analyzePlanImageRaw(planImageUrl, plotInfo);
+  return sanitizeBoundingBoxes(analysis);
+}
+
+async function analyzePlanImageRaw(
   planImageUrl: string,
   plotInfo?: PlotInfo
 ): Promise<PlanAnalysis> {
@@ -1388,7 +1396,7 @@ export function buildMoodboardPrompt(room: RoomDetail, style: StyleProfile): str
     "Balcony":        "balcony with outdoor furniture, planters, string lights, indoor-outdoor living",
     "Dining Room":    "dining room with table, pendant light, artwork on wall",
     "Study":          "home office with desk, bookshelves, task lighting",
-    "Pooja Room":     "pooja room, traditional joinery, soft lighting, devotional objects, serene and sacred",
+    "Pooja Room":     "pooja room, hindu home mandir shrine, carved wooden temple unit, brass diya lamps, soft warm lighting, serene and sacred",
   };
 
   const roomDesc   = roomVocab[room.name] ?? `${room.name.toLowerCase()} interior`;
@@ -1528,6 +1536,68 @@ async function downloadAndSaveImage(url: string, roomName: string): Promise<stri
   const slug   = roomName.toLowerCase().replace(/\s+/g, "-");
   const { url: localUrl } = await saveUploadedFile(buffer, `moodboard-${slug}-${Date.now()}.jpg`);
   return localUrl;
+}
+
+/**
+ * Vision models are unreliable at precise spatial grounding, especially the
+ * lighter/faster ones (Groq's Llama 4 Scout fallback in particular). On
+ * plans with several visually-identical rooms (e.g. three generic "Bed
+ * Room" labels), the model can assign the same or heavily-overlapping
+ * bounding box to two different rooms — each crop then looks "confidently"
+ * correct but actually shows the wrong room, or two rooms show the same
+ * crop.
+ *
+ * Rather than trust every box at face value, flag any pair of rooms whose
+ * boxes overlap too much (high IoU) and null both out. A missing crop
+ * that honestly falls back to the full plan is far less misleading to an
+ * architect than a wrong crop presented with full confidence.
+ */
+function sanitizeBoundingBoxes(analysis: PlanAnalysis): PlanAnalysis {
+  const rooms = analysis.rooms ?? [];
+  const boxed = rooms
+    .map((r, idx) => ({ idx, box: r.boundingBox }))
+    .filter((r): r is { idx: number; box: RoomBoundingBox } => !!r.box);
+
+  const suspect = new Set<number>();
+
+  for (let i = 0; i < boxed.length; i++) {
+    for (let j = i + 1; j < boxed.length; j++) {
+      const iou = boxIoU(boxed[i].box, boxed[j].box);
+      if (iou > 0.6) {
+        console.warn(
+          `[ai] Bounding box collision: "${rooms[boxed[i].idx].name}" and ` +
+          `"${rooms[boxed[j].idx].name}" overlap ${(iou * 100).toFixed(0)}% — ` +
+          `dropping both, falling back to full plan for these rooms`
+        );
+        suspect.add(boxed[i].idx);
+        suspect.add(boxed[j].idx);
+      }
+    }
+  }
+
+  if (suspect.size === 0) return analysis;
+
+  return {
+    ...analysis,
+    rooms: rooms.map((r, idx) => (suspect.has(idx) ? { ...r, boundingBox: undefined } : r)),
+  };
+}
+
+function boxIoU(a: RoomBoundingBox, b: RoomBoundingBox): number {
+  const ax2 = a.x + a.width,  ay2 = a.y + a.height;
+  const bx2 = b.x + b.width,  by2 = b.y + b.height;
+
+  const ix1 = Math.max(a.x, b.x), iy1 = Math.max(a.y, b.y);
+  const ix2 = Math.min(ax2, bx2), iy2 = Math.min(ay2, by2);
+
+  const iw = Math.max(0, ix2 - ix1), ih = Math.max(0, iy2 - iy1);
+  const intersection = iw * ih;
+  if (intersection === 0) return 0;
+
+  const areaA = a.width * a.height;
+  const areaB = b.width * b.height;
+  const union = areaA + areaB - intersection;
+  return union > 0 ? intersection / union : 0;
 }
 
 function parseAnalysisJson(text: string): PlanAnalysis {
