@@ -61,6 +61,8 @@ export default function MoodboardsPage() {
   const [overallMoodboard, setOverallMoodboard] = useState<OverallMoodboard | null>(null);
   const [roomMoodboards,   setRoomMoodboards]   = useState<RoomMoodboard[]>([]);
   const [styleSet,         setStyleSet]         = useState(false);
+  const [reanalysing,      setReanalysing]      = useState(false);
+  const [reanalyseError,   setReanalyseError]   = useState<string | null>(null);
 
   const STEPS = [
     { num: "1", label: "Upload",     status: "complete" as const },
@@ -185,6 +187,37 @@ export default function MoodboardsPage() {
       setRoomMoodboards(data.roomMoodboards);
     } catch (err) {
       setGlobalError(err instanceof Error ? err.message : "Image regeneration failed");
+    }
+  }
+
+  async function reanalysePlan() {
+    setReanalysing(true);
+    setReanalyseError(null);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 90000);
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "Re-analysis failed");
+      }
+      const data = await res.json();
+      // Update project with fresh analysis (includes new boundingBox data)
+      setProject((p) => p ? { ...p, analysis: data.analysis, status: "analyzed" } : p);
+      setGlobalError(null);
+    } catch (err) {
+      const isTimeout = err instanceof Error && err.name === "AbortError";
+      setReanalyseError(isTimeout
+        ? "Timed out — please try again."
+        : err instanceof Error ? err.message : "Re-analysis failed");
+    } finally {
+      setReanalysing(false);
     }
   }
 
@@ -354,11 +387,32 @@ export default function MoodboardsPage() {
             </div>
           )}
 
-          <button onClick={generate} disabled={generating} className="btn-primary w-full justify-center">
+          <button onClick={generate} disabled={generating || reanalysing} className="btn-primary w-full justify-center">
             {generating ? (
               <><span className="spinner" /><span>{currentStep || "Generating…"}</span></>
             ) : hasResults ? "↻ Regenerate All" : "Generate Moodboards →"}
           </button>
+
+          {/* Re-analyse — updates room data + bounding boxes for plan crops */}
+          <div className="pt-2 border-t border-stone-100 space-y-2">
+            <button
+              onClick={reanalysePlan}
+              disabled={reanalysing || generating}
+              className="btn-ghost w-full justify-center text-[11px]"
+            >
+              {reanalysing
+                ? <><span className="spinner w-3 h-3" style={{borderWidth:1}} /><span>Re-analysing plan…</span></>
+                : "⟳ Re-analyse Plan"}
+            </button>
+            {reanalyseError && (
+              <p className="font-mono text-[10px] text-red-500 text-center">{reanalyseError}</p>
+            )}
+            {!reanalyseError && !reanalysing && (
+              <p className="font-mono text-[9px] text-stone-300 text-center leading-tight">
+                Updates room data and enables plan cropping
+              </p>
+            )}
+          </div>
         </div>
 
         {/* ── Results ───────────────────────────────────────────────────── */}

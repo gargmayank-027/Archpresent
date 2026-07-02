@@ -173,78 +173,68 @@ export function buildUnsplashQuery(
   room?: RoomDetail,
   imageIndex?: number  // 0-3 — used to vary the search angle per image
 ): string {
+  // Terms are intentionally explicit to prevent Unsplash from returning
+  // off-topic photos (e.g. kitchen photos appearing in a living room pool).
+  // Each room term includes the PRIMARY furniture/element unique to that space.
   const roomTerms: Record<string, string> = {
-    "Living Room":     "living room sofa couch interior design",
-    "Kitchen":         "kitchen interior design cabinets countertop",
-    "Master Bedroom":  "master bedroom bed interior design",
-    "Bedroom 2":       "bedroom bed furniture interior design",
-    "Bedroom 3":       "bedroom interior design bed room",
-    "Bedroom 4":       "bedroom interior design",
-    "Bathroom":        "bathroom interior design tiles",
-    "Master Bathroom": "bathroom interior design bathtub shower",
-    "Common Bathroom": "bathroom interior design modern",
-    "Balcony":         "balcony outdoor terrace furniture",
-    "Dining Room":     "dining room table chairs interior",
-    "Study":           "home office desk study interior",
-    "Pooja Room":      "prayer room meditation interior design",
+    "Living Room":     "living room lounge sofa seating area",
+    "Kitchen":         "kitchen cabinets countertop appliances",
+    "Master Bedroom":  "master bedroom headboard bed pillows",
+    "Bedroom 2":       "bedroom headboard bed pillows",
+    "Bedroom 3":       "bedroom headboard bed furniture",
+    "Bedroom 4":       "bedroom headboard bed",
+    "Bathroom":        "bathroom vanity shower tiles",
+    "Master Bathroom": "bathroom bathtub shower vanity",
+    "Common Bathroom": "bathroom vanity toilet tiles",
+    "Balcony":         "balcony terrace outdoor seating",
+    "Dining Room":     "dining room dining table chairs",
+    "Study":           "home office desk bookshelf",
+    "Pooja Room":      "prayer room pooja altar spiritual",
   };
 
-  // Different search angles per image slot so all 4 images are distinct
-  // Keep angles interior-specific to avoid drifting to non-room results
+  // Image angle suffixes — kept very short to avoid over-constraining the search.
+  // The main differentiation between rooms comes from page offsets (roomIndex),
+  // not from different angle queries which shrink the result pool.
   const imageAngle: Record<number, string> = {
-    0: "interior photography",
-    1: "interior furniture detail",
-    2: "interior room design",
-    3: "interior decor",
+    0: "",
+    1: "",
+    2: "",
+    3: "",
   };
 
   const paletteTerms: Record<string, string> = {
-    LightAiry:   "light airy bright",
-    NeutralWarm: "warm earthy neutral tones",
-    DarkMoody:   "dark moody rich tones",
+    LightAiry:   "bright airy",
+    NeutralWarm: "warm neutral",
+    DarkMoody:   "dark tones",  // kept minimal — "dark moody rich tones" is too niche for Unsplash
   };
 
-  // Room base term is always first and most important — never let other
-  // attributes override it (that's what caused "study nook" to dominate
-  // Bedroom 2 searches and return desk/chair photos instead of bedrooms)
-  const base = roomTerms[roomName] ?? `${roomName.toLowerCase()} interior design`;
-  const parts: string[] = [base];
+  // Build a tight, focused query. Unsplash performs best with 3-6 words.
+  // The room base term already includes the critical anchoring keywords.
+  // Style is added but palette/size/features are kept minimal to avoid
+  // over-constraining the search and returning too few results.
+  const base = roomTerms[roomName] ?? `${roomName.toLowerCase()} interior`;
+  
+  const parts: string[] = [base, style.toLowerCase()];
 
-  // Style and palette — second most important signal after room type
-  parts.push(style.toLowerCase());
-  parts.push(paletteTerms[palette] ?? "");
+  // Palette — use only if it meaningfully changes the aesthetic
+  const pal = paletteTerms[palette] ?? "";
+  if (pal) parts.push(pal);
 
-  // Per-image angle — vary the type of shot, but keep it room-anchored
-  // Use only the angle suffix (no freeform text) to avoid drifting
-  if (imageIndex !== undefined) {
-    parts.push(imageAngle[imageIndex] ?? "");
-  }
-
-  // Architect context prompt appended AFTER core room type — it refines
-  // but can't override the fundamental room category
-  if (contextPrompt?.trim()) {
+  // Context prompt from architect — append only if short and specific
+  if (contextPrompt?.trim() && contextPrompt.trim().split(" ").length <= 4) {
     parts.push(contextPrompt.trim());
   }
 
-  // Special features: only add if they make sense as interior search terms
-  // and only for rooms where features relate to the room itself (not sub-spaces)
-  // e.g. "attached bath" is fine, "study nook" would pull study/office photos
-  const SAFE_FEATURES: string[] = [
-    "attached bath", "ensuite", "walk-in wardrobe", "built-in wardrobe",
-    "double height", "feature wall", "fireplace", "skylight",
-    "island counter", "breakfast counter", "bay window",
+  // Safe special features that are Unsplash-searchable interior keywords
+  const SAFE_FEATURES = [
+    "fireplace", "skylight", "bay window", "island counter",
+    "walk-in wardrobe", "feature wall",
   ];
   if (room?.specialFeatures?.length) {
     const feat = room.specialFeatures[(imageIndex ?? 0) % room.specialFeatures.length];
     if (feat && SAFE_FEATURES.some((sf) => feat.toLowerCase().includes(sf.toLowerCase()))) {
-      parts.push(feat);
+      parts.push(feat.toLowerCase());
     }
-  }
-
-  // Size hint only for very large or very small rooms
-  if (room?.sizeEstimateSqm) {
-    if (room.sizeEstimateSqm > 200) parts.push("spacious large room");
-    else if (room.sizeEstimateSqm < 60) parts.push("compact small room");
   }
 
   return parts.filter(Boolean).join(" ");

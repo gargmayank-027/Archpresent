@@ -114,11 +114,13 @@ export async function POST(req: NextRequest) {
       const images = await generateRoomMoodboard(roomDetail as RoomDetail, styleProfile, contextPrompt, roomIdx);
 
       // Crop plan snippet for this room -- only if real coordinates exist.
+      const bbox = (roomDetail as RoomDetail).boundingBox;
+      console.log(`[moodboards] ${roomName} boundingBox:`, bbox ? JSON.stringify(bbox) : "none (re-analyse plan to get room coordinates)");
       const planSnippetUrl = await cropRoomFromPlan(
         project.planImagePath,
         roomName,
         projectId,
-        (roomDetail as RoomDetail).boundingBox
+        bbox
       );
 
       generated.push({

@@ -392,16 +392,19 @@ async function generateRoomMoodboardFromUnsplash(
   let pool: MoodImage[] = [];
 
   try {
+    // Always fetch 2 pages to build a pool of up to 20 photos.
+    // This guarantees 4 unique images even when the first page has duplicates
+    // or the search is specific (e.g. "dark tones" kitchen gives fewer results).
     const page1 = await searchUnsplashPhotos(baseQuery, 10, startPage);
     pool = [...page1];
 
-    // If pool is thin, supplement with next page
-    if (pool.length < 4) {
-      const variantQuery = buildUnsplashQuery(
-        room.name, style.overallStyle, style.palette, contextPrompt, room, 2
-      );
-      const page2 = await searchUnsplashPhotos(variantQuery, 10, (startPage + 1) % 3);
+    // Always get a second page from a different offset to ensure variety
+    const page2Start = (startPage + 1) % 4;
+    try {
+      const page2 = await searchUnsplashPhotos(baseQuery, 10, page2Start);
       pool = [...pool, ...page2.filter((p) => !pool.some((e) => e.url === p.url))];
+    } catch {
+      // page 2 optional — continue with whatever page 1 gave us
     }
   } catch (err) {
     console.warn(`[ai] Unsplash fetch failed for ${room.name}:`, err);
@@ -411,18 +414,20 @@ async function generateRoomMoodboardFromUnsplash(
   const usedUrls: string[] = [];
 
   for (let i = 0; i < 4; i++) {
-    // Pick a fresh image from the pool, evenly spread across the results
-    // so we don't always pick the top 4 (avoids repetition across rooms)
-    const offset = i * Math.floor(pool.length / 4);
-    const candidate = pool.slice(offset).find((r) => !usedUrls.includes(r.url))
-      ?? pool.find((r) => !usedUrls.includes(r.url));
+    // Pick distinct photos spread evenly across the pool.
+    // With 20 photos in the pool, each slot gets photos from a different
+    // section (0-4, 5-9, 10-14, 15-19) so all 4 are visually distinct.
+    const sectionSize = Math.max(1, Math.floor(pool.length / 4));
+    const sectionStart = i * sectionSize;
+    const candidate = pool.slice(sectionStart).find((r) => !usedUrls.includes(r.url))
+      ?? pool.find((r) => !usedUrls.includes(r.url)); // fallback: any unused photo
 
     if (candidate) {
       usedUrls.push(candidate.url);
       images.push({ ...candidate, caption: ROOM_IMAGE_CAPTIONS[i], source: "unsplash" as const });
     } else {
-      // Pool exhausted — fill with AI generation
-      console.warn(`[ai] Unsplash pool exhausted at slot ${i} for ${room.name}`);
+      // Truly exhausted — fill remaining slots with AI generation
+      console.warn(`[ai] Unsplash pool exhausted at slot ${i} for ${room.name} (pool size: ${pool.length})`);
       try {
         const prompt = buildMoodboardPrompt(room, style) +
           (i === 1 ? " detail shot" : i === 2 ? " atmospheric lighting" : i === 3 ? " close-up materials" : "");

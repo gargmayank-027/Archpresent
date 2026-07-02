@@ -11,6 +11,7 @@ export default function ExportPage() {
   const [project,     setProject]     = useState<Project | null>(null);
   const [loading,     setLoading]     = useState(true);
   const [exporting,   setExporting]   = useState(false);
+  const [reanalysing, setReanalysing] = useState(false);
   const [exportDone,  setExportDone]  = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
@@ -133,6 +134,23 @@ export default function ExportPage() {
     }
   }
 
+  async function reanalysePlan() {
+    setReanalysing(true);
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProject((p) => p ? { ...p, analysis: data.analysis } : p);
+      }
+    } catch { /* ignore */ } finally {
+      setReanalysing(false);
+    }
+  }
+
   if (loading)  return <PageSkeleton />;
   if (!project) return <div className="p-12 text-center text-stone-400">Project not found.</div>;
 
@@ -195,6 +213,10 @@ export default function ExportPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <button onClick={reanalysePlan} disabled={reanalysing || exporting}
+              className="btn-ghost text-xs" title="Re-run plan analysis to update room data and enable plan cropping">
+              {reanalysing ? <><span className="spinner w-3 h-3" style={{borderWidth:1}} /><span>Re-analysing…</span></> : "⟳ Re-analyse"}
+            </button>
             <a href={`/project/${id}/moodboards`} className="btn-secondary">
               ← Edit Moodboards
             </a>
