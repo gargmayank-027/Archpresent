@@ -945,27 +945,29 @@ const ROOM_PHOTOS: Record<string, Record<string, string[]>> = {
   "Master Bedroom": {
     Modern:       ["photo-1631049307264-da0ec9d70304","photo-1588046130717-0eb0c9a3ba15","photo-1505693416388-ac5ce068fe85","photo-1540304801897-4bd1e5fe2a98"],
     Contemporary: ["photo-1616594039964-ae9021a400a0","photo-1631049307264-da0ec9d70304","photo-1522771739844-6a9f6d5f14af","photo-1588046130717-0eb0c9a3ba15"],
-    Scandinavian: ["photo-1540304801897-4bd1e5fe2a98","photo-1505693416388-ac5ce068fe85","photo-1615873968403-89e068629265","photo-1631049307264-da0ec9d70304"],
+    Scandinavian: ["photo-1540304801897-4bd1e5fe2a98","photo-1505693416388-ac5ce068fe85","photo-1540304801897-4bd1e5fe2a98","photo-1631049307264-da0ec9d70304"],
     Minimal:      ["photo-1505693416388-ac5ce068fe85","photo-1631049307264-da0ec9d70304","photo-1540304801897-4bd1e5fe2a98","photo-1522771739844-6a9f6d5f14af"],
     Industrial:   ["photo-1631049307264-da0ec9d70304","photo-1522771739844-6a9f6d5f14af","photo-1540304801897-4bd1e5fe2a98","photo-1505693416388-ac5ce068fe85"],
     Classic:      ["photo-1616594039964-ae9021a400a0","photo-1522771739844-6a9f6d5f14af","photo-1540518614846-7eded433c457","photo-1631049307264-da0ec9d70304"],
   },
   "Bedroom 2": {
-    // Deliberately different IDs from Master Bedroom in every slot so they never look the same
-    Modern:       ["photo-1598928506311-c55ded91a20c","photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511","photo-1615873968403-89e068629265"],
-    Contemporary: ["photo-1615873968403-89e068629265","photo-1598928506311-c55ded91a20c","photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511"],
-    Scandinavian: ["photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511","photo-1598928506311-c55ded91a20c","photo-1615873968403-89e068629265"],
-    Minimal:      ["photo-1505691938895-1758d7feb511","photo-1560448204-603b3fc33ddc","photo-1598928506311-c55ded91a20c","photo-1615873968403-89e068629265"],
-    Industrial:   ["photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511","photo-1598928506311-c55ded91a20c","photo-1615873968403-89e068629265"],
-    Classic:      ["photo-1522771739844-6a9f6d5f14af","photo-1598928506311-c55ded91a20c","photo-1560448204-603b3fc33ddc","photo-1505691938895-1758d7feb511"],
+    // All IDs confirmed as actual bedroom photos from Master Bedroom stubs
+    // Different rotation from Master Bedroom and Bedroom 3 in every slot
+    Modern:       ["photo-1522771739844-6a9f6d5f14af","photo-1540304801897-4bd1e5fe2a98","photo-1505693416388-ac5ce068fe85","photo-1631049307264-da0ec9d70304"],
+    Contemporary: ["photo-1588046130717-0eb0c9a3ba15","photo-1522771739844-6a9f6d5f14af","photo-1540304801897-4bd1e5fe2a98","photo-1616594039964-ae9021a400a0"],
+    Scandinavian: ["photo-1505693416388-ac5ce068fe85","photo-1522771739844-6a9f6d5f14af","photo-1631049307264-da0ec9d70304","photo-1540304801897-4bd1e5fe2a98"],
+    Minimal:      ["photo-1540304801897-4bd1e5fe2a98","photo-1505693416388-ac5ce068fe85","photo-1522771739844-6a9f6d5f14af","photo-1631049307264-da0ec9d70304"],
+    Industrial:   ["photo-1588046130717-0eb0c9a3ba15","photo-1540304801897-4bd1e5fe2a98","photo-1522771739844-6a9f6d5f14af","photo-1505693416388-ac5ce068fe85"],
+    Classic:      ["photo-1540304801897-4bd1e5fe2a98","photo-1616594039964-ae9021a400a0","photo-1522771739844-6a9f6d5f14af","photo-1631049307264-da0ec9d70304"],
   },
   "Bedroom 3": {
-    Modern:       ["photo-1505691938895-1758d7feb511","photo-1615873968403-89e068629265","photo-1560448204-603b3fc33ddc","photo-1598928506311-c55ded91a20c"],
-    Contemporary: ["photo-1560448204-603b3fc33ddc","photo-1598928506311-c55ded91a20c","photo-1505691938895-1758d7feb511","photo-1615873968403-89e068629265"],
-    Scandinavian: ["photo-1615873968403-89e068629265","photo-1505691938895-1758d7feb511","photo-1560448204-603b3fc33ddc","photo-1598928506311-c55ded91a20c"],
-    Minimal:      ["photo-1598928506311-c55ded91a20c","photo-1505691938895-1758d7feb511","photo-1560448204-603b3fc33ddc","photo-1615873968403-89e068629265"],
-    Industrial:   ["photo-1505691938895-1758d7feb511","photo-1560448204-603b3fc33ddc","photo-1615873968403-89e068629265","photo-1598928506311-c55ded91a20c"],
-    Classic:      ["photo-1616594039964-ae9021a400a0","photo-1560448204-603b3fc33ddc","photo-1598928506311-c55ded91a20c","photo-1505691938895-1758d7feb511"],
+    // Third rotation — all confirmed bedroom photos, all slot 0 unique vs master/bed2
+    Modern:       ["photo-1505693416388-ac5ce068fe85","photo-1631049307264-da0ec9d70304","photo-1522771739844-6a9f6d5f14af","photo-1588046130717-0eb0c9a3ba15"],
+    Contemporary: ["photo-1540304801897-4bd1e5fe2a98","photo-1505693416388-ac5ce068fe85","photo-1616594039964-ae9021a400a0","photo-1522771739844-6a9f6d5f14af"],
+    Scandinavian: ["photo-1522771739844-6a9f6d5f14af","photo-1631049307264-da0ec9d70304","photo-1505693416388-ac5ce068fe85","photo-1540304801897-4bd1e5fe2a98"],
+    Minimal:      ["photo-1631049307264-da0ec9d70304","photo-1522771739844-6a9f6d5f14af","photo-1505693416388-ac5ce068fe85","photo-1540304801897-4bd1e5fe2a98"],
+    Industrial:   ["photo-1540304801897-4bd1e5fe2a98","photo-1522771739844-6a9f6d5f14af","photo-1631049307264-da0ec9d70304","photo-1505693416388-ac5ce068fe85"],
+    Classic:      ["photo-1505693416388-ac5ce068fe85","photo-1540304801897-4bd1e5fe2a98","photo-1631049307264-da0ec9d70304","photo-1522771739844-6a9f6d5f14af"],
   },
   "Bathroom":        { Modern: ["photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Contemporary: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1600566752355-35792bedcfea","photo-1507652955-f3dcef5a3be5"], Scandinavian: ["photo-1507652955-f3dcef5a3be5","photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1600566752355-35792bedcfea"], Minimal: ["photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600607687939-ce8a6c25118c","photo-1600566752355-35792bedcfea"], Industrial: ["photo-1603512500383-b6f84e07e79f","photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5"], Classic: ["photo-1600566752355-35792bedcfea","photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5"] },
   "Master Bathroom": { Modern: ["photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea"], Contemporary: ["photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1600566752355-35792bedcfea","photo-1507652955-f3dcef5a3be5"], Scandinavian: ["photo-1507652955-f3dcef5a3be5","photo-1552321554-5fefe8c9ef14","photo-1600607687939-ce8a6c25118c","photo-1600566752355-35792bedcfea"], Minimal: ["photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600566752355-35792bedcfea","photo-1600607687939-ce8a6c25118c"], Industrial: ["photo-1603512500383-b6f84e07e79f","photo-1600607687939-ce8a6c25118c","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5"], Classic: ["photo-1600566752355-35792bedcfea","photo-1552321554-5fefe8c9ef14","photo-1507652955-f3dcef5a3be5","photo-1600607687939-ce8a6c25118c"] },

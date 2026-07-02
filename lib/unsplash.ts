@@ -174,27 +174,28 @@ export function buildUnsplashQuery(
   imageIndex?: number  // 0-3 — used to vary the search angle per image
 ): string {
   const roomTerms: Record<string, string> = {
-    "Living Room":     "living room interior",
-    "Kitchen":         "kitchen interior design",
-    "Master Bedroom":  "master bedroom interior design",
-    "Bedroom 2":       "guest bedroom interior design",
-    "Bedroom 3":       "children bedroom interior design",
+    "Living Room":     "living room sofa couch interior design",
+    "Kitchen":         "kitchen interior design cabinets countertop",
+    "Master Bedroom":  "master bedroom bed interior design",
+    "Bedroom 2":       "bedroom bed furniture interior design",
+    "Bedroom 3":       "bedroom interior design bed room",
     "Bedroom 4":       "bedroom interior design",
-    "Bathroom":        "bathroom interior design",
-    "Master Bathroom": "luxury ensuite bathroom",
-    "Common Bathroom": "modern bathroom interior",
-    "Balcony":         "balcony terrace outdoor",
-    "Dining Room":     "dining room interior",
-    "Study":           "home office study room",
-    "Pooja Room":      "meditation prayer room interior",
+    "Bathroom":        "bathroom interior design tiles",
+    "Master Bathroom": "bathroom interior design bathtub shower",
+    "Common Bathroom": "bathroom interior design modern",
+    "Balcony":         "balcony outdoor terrace furniture",
+    "Dining Room":     "dining room table chairs interior",
+    "Study":           "home office desk study interior",
+    "Pooja Room":      "prayer room meditation interior design",
   };
 
   // Different search angles per image slot so all 4 images are distinct
+  // Keep angles interior-specific to avoid drifting to non-room results
   const imageAngle: Record<number, string> = {
-    0: "wide angle interior photography",
-    1: "interior detail furniture",
-    2: "ambient lighting atmosphere",
-    3: "interior design close-up materials",
+    0: "interior photography",
+    1: "interior furniture detail",
+    2: "interior room design",
+    3: "interior decor",
   };
 
   const paletteTerms: Record<string, string> = {
