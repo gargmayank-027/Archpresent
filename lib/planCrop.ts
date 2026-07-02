@@ -52,17 +52,26 @@ export async function cropRoomFromPlan(
     const pw   = meta.width  ?? 1000;
     const ph   = meta.height ?? 1000;
 
-    // Validate bounding box — LLMs sometimes return values outside 0-1 range
-    // or nonsensically small boxes. Reject obviously wrong coordinates.
-    if (
-      boundingBox.x < 0 || boundingBox.x > 1 ||
-      boundingBox.y < 0 || boundingBox.y > 1 ||
-      boundingBox.width  <= 0.01 || boundingBox.width  > 1 ||
-      boundingBox.height <= 0.01 || boundingBox.height > 1
-    ) {
-      console.warn(`[planCrop] Invalid boundingBox for ${roomName}:`, boundingBox);
+    // Clamp and validate bounding box — LLMs sometimes return values slightly
+    // outside 0-1 range (e.g. 1.02) or forget to include it.
+    // Be lenient: clamp to valid range rather than rejecting.
+    const bb = {
+      x:      Math.max(0, Math.min(0.95, boundingBox.x)),
+      y:      Math.max(0, Math.min(0.95, boundingBox.y)),
+      width:  Math.max(0.05, Math.min(1, boundingBox.width)),
+      height: Math.max(0.05, Math.min(1, boundingBox.height)),
+    };
+
+    // Only reject if clearly nonsensical (e.g. all zeros)
+    if (bb.x === 0 && bb.y === 0 && bb.width >= 0.99 && bb.height >= 0.99) {
+      console.warn(`[planCrop] boundingBox covers entire image for ${roomName} — likely a fallback, skipping`);
       return null;
     }
+
+    console.log(`[planCrop] Cropping ${roomName} at x:${bb.x.toFixed(2)} y:${bb.y.toFixed(2)} w:${bb.width.toFixed(2)} h:${bb.height.toFixed(2)}`);
+
+    // Use clamped values
+    const boundingBox = bb;
 
     const left = Math.max(0, boundingBox.x - PAD);
     const top  = Math.max(0, boundingBox.y - PAD);

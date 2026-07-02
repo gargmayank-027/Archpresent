@@ -177,19 +177,19 @@ export function buildUnsplashQuery(
   // off-topic photos (e.g. kitchen photos appearing in a living room pool).
   // Each room term includes the PRIMARY furniture/element unique to that space.
   const roomTerms: Record<string, string> = {
-    "Living Room":     "living room lounge sofa seating area",
-    "Kitchen":         "kitchen cabinets countertop appliances",
-    "Master Bedroom":  "master bedroom headboard bed pillows",
-    "Bedroom 2":       "bedroom headboard bed pillows",
-    "Bedroom 3":       "bedroom headboard bed furniture",
-    "Bedroom 4":       "bedroom headboard bed",
-    "Bathroom":        "bathroom vanity shower tiles",
-    "Master Bathroom": "bathroom bathtub shower vanity",
-    "Common Bathroom": "bathroom vanity toilet tiles",
-    "Balcony":         "balcony terrace outdoor seating",
-    "Dining Room":     "dining room dining table chairs",
-    "Study":           "home office desk bookshelf",
-    "Pooja Room":      "prayer room pooja altar spiritual",
+    "Living Room":     "living room sofa interior design",
+    "Kitchen":         "kitchen interior design",
+    "Master Bedroom":  "bedroom interior design",  // simplified — "master bedroom headboard bed pillows" returns 0 results on page 3+
+    "Bedroom 2":       "bedroom interior",
+    "Bedroom 3":       "bedroom interior design",
+    "Bedroom 4":       "bedroom interior",
+    "Bathroom":        "bathroom interior design",
+    "Master Bathroom": "bathroom interior design",
+    "Common Bathroom": "bathroom interior",
+    "Balcony":         "balcony terrace outdoor",
+    "Dining Room":     "dining room interior design",
+    "Study":           "home office interior",
+    "Pooja Room":      "prayer room interior",
   };
 
   // Image angle suffixes — kept very short to avoid over-constraining the search.

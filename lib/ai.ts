@@ -387,40 +387,53 @@ async function generateRoomMoodboardFromUnsplash(
     room.name, style.overallStyle, style.palette, contextPrompt, room, 0
   );
 
-  const startPage = roomIndex % 3; // rooms 0,1,2 → pages 0,1,2 → different result sets
+  // Cap page offset at 1 — Unsplash runs out of results at page 3+
+  // for specific interior queries. Pages 0 and 1 reliably return results.
+  const startPage = roomIndex % 2; // alternate between page 0 and page 1 only
 
   let pool: MoodImage[] = [];
 
   try {
-    // Always fetch 2 pages to build a pool of up to 20 photos.
-    // This guarantees 4 unique images even when the first page has duplicates
-    // or the search is specific (e.g. "dark tones" kitchen gives fewer results).
     const page1 = await searchUnsplashPhotos(baseQuery, 10, startPage);
     pool = [...page1];
 
-    // Always get a second page from a different offset to ensure variety
-    const page2Start = (startPage + 1) % 4;
-    try {
-      const page2 = await searchUnsplashPhotos(baseQuery, 10, page2Start);
-      pool = [...pool, ...page2.filter((p) => !pool.some((e) => e.url === p.url))];
-    } catch {
-      // page 2 optional — continue with whatever page 1 gave us
+    // Second page from the other offset
+    const page2Start = 1 - startPage; // if startPage=0, use 1; if 1, use 0
+    if (pool.length < 8) { // only fetch page 2 if page 1 didn't give enough
+      try {
+        const page2 = await searchUnsplashPhotos(baseQuery, 10, page2Start);
+        pool = [...pool, ...page2.filter((p) => !pool.some((e) => e.url === p.url))];
+      } catch {
+        // page 2 optional
+      }
     }
   } catch (err) {
     console.warn(`[ai] Unsplash fetch failed for ${room.name}:`, err);
+    // Try a simpler fallback query (just room type + style, no palette)
+    try {
+      const fallbackQuery = buildUnsplashQuery(room.name, style.overallStyle, "LightAiry", undefined, undefined, 0);
+      const fallback = await searchUnsplashPhotos(fallbackQuery, 10, 0);
+      pool = [...fallback];
+      console.log(`[ai] Fallback query succeeded for ${room.name}: ${fallback.length} results`);
+    } catch {
+      // pool stays empty, will fall through to AI generation per slot
+    }
   }
 
   const images: MoodImage[] = [];
   const usedUrls: string[] = [];
 
   for (let i = 0; i < 4; i++) {
-    // Pick distinct photos spread evenly across the pool.
-    // With 20 photos in the pool, each slot gets photos from a different
-    // section (0-4, 5-9, 10-14, 15-19) so all 4 are visually distinct.
+    // Pick distinct photos spread across the pool — each slot gets a different
+    // section so all 4 images are visually distinct.
     const sectionSize = Math.max(1, Math.floor(pool.length / 4));
     const sectionStart = i * sectionSize;
-    const candidate = pool.slice(sectionStart).find((r) => !usedUrls.includes(r.url))
-      ?? pool.find((r) => !usedUrls.includes(r.url)); // fallback: any unused photo
+    // For slot 0 (Wide View), prefer photos with actual rooms — skip pure detail/texture shots
+    // by preferring those with longer, more descriptive alt text
+    const sectionPool = pool.slice(sectionStart);
+    let candidate = sectionPool.find((r) => !usedUrls.includes(r.url) && (r.caption?.split(" ").length ?? 0) > 2)
+      ?? sectionPool.find((r) => !usedUrls.includes(r.url))
+      ?? pool.find((r) => !usedUrls.includes(r.url)); // fallback: any unused
 
     if (candidate) {
       usedUrls.push(candidate.url);
@@ -1114,10 +1127,13 @@ Rules:
 - Identify ALL rooms visible including bathrooms, store rooms, balconies
 - Estimate sizes from furniture scale and typical proportions
 - adjacentRooms must use exact same names as in rooms array
-- boundingBox: normalised 0.0-1.0 coordinates of the room within the floor plan image.
-  x,y = top-left corner of the room boundary, width/height = extent of the room.
-  Origin (0,0) is top-left of the image. Be as accurate as possible by reading the
-  room labels and boundaries directly from the plan.
+- boundingBox: REQUIRED for every room. Estimate normalised 0.0-1.0 coordinates
+  of where this room sits within the floor plan image.
+  x,y = top-left corner, width/height = extent. Origin (0,0) is top-left of the image.
+  Example: a room occupying the top-left quarter = {"x":0.0,"y":0.0,"width":0.5,"height":0.5}
+  A room in the bottom-right = {"x":0.5,"y":0.5,"width":0.5,"height":0.5}
+  Look at the room label position on the plan and estimate accordingly.
+  Every room MUST have a boundingBox — do not omit it.
 - comments: 3-5 short architectural observations
 - Return ONLY the JSON object. No markdown, no explanation.
 ${context}`;

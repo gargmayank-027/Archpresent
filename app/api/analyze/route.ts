@@ -104,7 +104,15 @@ export async function POST(req: NextRequest) {
     let analysis;
     try {
       analysis = await analyzePlanImage(imageUrlForAI, project.plotInfo);
-      console.log(`[analyze] Analysis done — ${analysis.rooms.length} rooms detected`);
+      const roomsWithBoxes = analysis.rooms.filter((r) => r.boundingBox).length;
+      console.log(`[analyze] Analysis done — ${analysis.rooms.length} rooms detected, ${roomsWithBoxes}/${analysis.rooms.length} have bounding boxes`);
+      // Log sample bounding box for debugging
+      const firstWithBox = analysis.rooms.find((r) => r.boundingBox);
+      if (firstWithBox) {
+        console.log(`[analyze] Sample boundingBox (${firstWithBox.name}):`, JSON.stringify(firstWithBox.boundingBox));
+      } else {
+        console.log(`[analyze] No bounding boxes returned — Gemini may not support spatial coordinates for this plan`);
+      }
     } catch (aiErr) {
       console.error("[analyze] AI analysis failed:", aiErr);
       const errMsg = String(aiErr);
