@@ -27,7 +27,7 @@
  * for exactly this purpose -- the UI must render them (see moodboards page).
  */
 
-import type { MoodImage } from "@/types";
+import type { MoodImage, RoomDetail } from "@/types";
 
 const UNSPLASH_API = "https://api.unsplash.com";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -169,38 +169,66 @@ export function buildUnsplashQuery(
   roomName: string,
   style: string,
   palette: string,
-  contextPrompt?: string
+  contextPrompt?: string,
+  room?: RoomDetail,
+  imageIndex?: number  // 0-3 — used to vary the search angle per image
 ): string {
   const roomTerms: Record<string, string> = {
     "Living Room":     "living room interior",
     "Kitchen":         "kitchen interior design",
-    "Master Bedroom":  "bedroom interior design",
-    "Bedroom 2":       "bedroom interior",
-    "Bedroom 3":       "bedroom interior",
-    "Bedroom 4":       "bedroom interior",
+    "Master Bedroom":  "master bedroom interior design",
+    "Bedroom 2":       "guest bedroom interior design",
+    "Bedroom 3":       "children bedroom interior design",
+    "Bedroom 4":       "bedroom interior design",
     "Bathroom":        "bathroom interior design",
-    "Master Bathroom": "bathroom interior design",
-    "Common Bathroom": "bathroom interior",
+    "Master Bathroom": "luxury ensuite bathroom",
+    "Common Bathroom": "modern bathroom interior",
     "Balcony":         "balcony terrace outdoor",
     "Dining Room":     "dining room interior",
     "Study":           "home office study room",
     "Pooja Room":      "meditation prayer room interior",
   };
 
-  const paletteTerms: Record<string, string> = {
-    LightAiry:   "light bright white",
-    NeutralWarm: "warm neutral earthy",
-    DarkMoody:   "dark moody charcoal",
+  // Different search angles per image slot so all 4 images are distinct
+  const imageAngle: Record<number, string> = {
+    0: "wide angle interior photography",
+    1: "interior detail furniture",
+    2: "ambient lighting atmosphere",
+    3: "interior design close-up materials",
   };
 
-  const parts = [
+  const paletteTerms: Record<string, string> = {
+    LightAiry:   "light airy bright",
+    NeutralWarm: "warm earthy neutral tones",
+    DarkMoody:   "dark moody rich tones",
+  };
+
+  const parts: string[] = [
     roomTerms[roomName] ?? `${roomName.toLowerCase()} interior`,
-    style.toLowerCase(),
-    paletteTerms[palette] ?? "",
   ];
 
+  // Fold in architect's context prompt first — highest specificity
   if (contextPrompt?.trim()) {
-    parts.splice(1, 0, contextPrompt.trim());
+    parts.push(contextPrompt.trim());
+  }
+
+  // Room-specific attributes to differentiate similar rooms
+  if (room?.orientation) parts.push(room.orientation);
+  if (room?.specialFeatures?.length) {
+    // Pick one feature per image slot to vary results
+    const feat = room.specialFeatures[(imageIndex ?? 0) % room.specialFeatures.length];
+    if (feat) parts.push(feat);
+  }
+  if (room?.sizeEstimateSqm) {
+    parts.push(room.sizeEstimateSqm > 150 ? "large spacious room" : "cozy compact room");
+  }
+
+  parts.push(style.toLowerCase());
+  parts.push(paletteTerms[palette] ?? "");
+
+  // Per-image angle variation — makes each slot search for a distinct shot type
+  if (imageIndex !== undefined) {
+    parts.push(imageAngle[imageIndex] ?? "");
   }
 
   return parts.filter(Boolean).join(" ");

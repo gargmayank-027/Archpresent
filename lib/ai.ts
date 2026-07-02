@@ -376,19 +376,47 @@ async function generateRoomMoodboardFromUnsplash(
   style: StyleProfile,
   contextPrompt?: string
 ): Promise<MoodImage[]> {
-  const query = buildUnsplashQuery(room.name, style.overallStyle, style.palette, contextPrompt);
-  const results = await searchUnsplashPhotos(query, 4);
+  // Each image slot uses a DIFFERENT search query (different angle, feature,
+  // size hint) so rooms of the same type return visually distinct photos.
+  // We also pull from different pages so the cache doesn't deduplicate across
+  // rooms with similar queries.
+  const images: MoodImage[] = [];
+  const usedUrls: string[] = [];
 
-  if (results.length === 0) {
-    throw new Error("No Unsplash results");
+  for (let i = 0; i < 4; i++) {
+    try {
+      // Unique query per image slot — varies angle, special feature, size
+      const query = buildUnsplashQuery(
+        room.name, style.overallStyle, style.palette, contextPrompt, room, i
+      );
+
+      // Stagger page offset so similar rooms get different result sets
+      // even if the query ends up similar after deduplication
+      const pageOffset = i % 2; // alternate pages 1 and 2
+      const results = await searchUnsplashPhotos(query, 10, pageOffset);
+
+      // Pick the first result not already used in this room's moodboard
+      const fresh = results.find((r) => !usedUrls.includes(r.url)) ?? results[0];
+      if (!fresh) throw new Error("No results");
+
+      usedUrls.push(fresh.url);
+      images.push({ ...fresh, caption: ROOM_IMAGE_CAPTIONS[i], source: "unsplash" as const });
+    } catch (err) {
+      console.warn(`[ai] Unsplash slot ${i} failed for ${room.name}:`, err);
+      // Fill slot with AI generation rather than leaving it blank
+      try {
+        const prompt = buildMoodboardPrompt(room, style) +
+          (i === 1 ? " detail shot" : i === 2 ? " atmospheric lighting" : i === 3 ? " close-up materials" : "");
+        const url = await generateWithPollinations(prompt, room.name);
+        images.push({ url, caption: ROOM_IMAGE_CAPTIONS[i], source: "ai" as const });
+      } catch {
+        const stubUrl = await moodboardStub(room, style);
+        images.push({ url: stubUrl, caption: ROOM_IMAGE_CAPTIONS[i], source: "ai" as const });
+      }
+    }
   }
 
-  // Apply our own captions (wide/detail/atmosphere/close-up) over whatever
-  // alt-text Unsplash returned, for visual consistency with the AI path
-  return results.map((img, i) => ({
-    ...img,
-    caption: ROOM_IMAGE_CAPTIONS[i] ?? img.caption,
-  }));
+  return images;
 }
 
 // AI-generated fallback — 3-4 images via varied prompts (wide shot, detail,
@@ -1037,7 +1065,13 @@ Analyse the floor plan image and return a single JSON object matching EXACTLY th
       "orientation": string,
       "adjacentRooms": string[],
       "specialFeatures": string[],
-      "furnitureHints": string[]
+      "furnitureHints": string[],
+      "boundingBox": {
+        "x": number,
+        "y": number,
+        "width": number,
+        "height": number
+      }
     }
   ],
   "hasBalcony": boolean,
@@ -1052,6 +1086,10 @@ Rules:
 - Identify ALL rooms visible including bathrooms, store rooms, balconies
 - Estimate sizes from furniture scale and typical proportions
 - adjacentRooms must use exact same names as in rooms array
+- boundingBox: normalised 0.0-1.0 coordinates of the room within the floor plan image.
+  x,y = top-left corner of the room boundary, width/height = extent of the room.
+  Origin (0,0) is top-left of the image. Be as accurate as possible by reading the
+  room labels and boundaries directly from the plan.
 - comments: 3-5 short architectural observations
 - Return ONLY the JSON object. No markdown, no explanation.
 ${context}`;

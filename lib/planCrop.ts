@@ -52,6 +52,18 @@ export async function cropRoomFromPlan(
     const pw   = meta.width  ?? 1000;
     const ph   = meta.height ?? 1000;
 
+    // Validate bounding box — LLMs sometimes return values outside 0-1 range
+    // or nonsensically small boxes. Reject obviously wrong coordinates.
+    if (
+      boundingBox.x < 0 || boundingBox.x > 1 ||
+      boundingBox.y < 0 || boundingBox.y > 1 ||
+      boundingBox.width  <= 0.01 || boundingBox.width  > 1 ||
+      boundingBox.height <= 0.01 || boundingBox.height > 1
+    ) {
+      console.warn(`[planCrop] Invalid boundingBox for ${roomName}:`, boundingBox);
+      return null;
+    }
+
     const left = Math.max(0, boundingBox.x - PAD);
     const top  = Math.max(0, boundingBox.y - PAD);
     const right = Math.min(1, boundingBox.x + boundingBox.width  + PAD);
