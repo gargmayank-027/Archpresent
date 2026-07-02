@@ -77,13 +77,11 @@ export async function cropRoomFromPlan(
 
     console.log(`[planCrop] Cropping ${roomName} at x:${bb.x.toFixed(2)} y:${bb.y.toFixed(2)} w:${bb.width.toFixed(2)} h:${bb.height.toFixed(2)}`);
 
-    // Use clamped values
-    const boundingBox = bb;
-
-    const left = Math.max(0, boundingBox.x - PAD);
-    const top  = Math.max(0, boundingBox.y - PAD);
-    const right = Math.min(1, boundingBox.x + boundingBox.width  + PAD);
-    const bot   = Math.min(1, boundingBox.y + boundingBox.height + PAD);
+    // Use clamped bb values (never re-declare boundingBox — causes minifier TDZ error)
+    const left  = Math.max(0, bb.x - PAD);
+    const top   = Math.max(0, bb.y - PAD);
+    const right = Math.min(1, bb.x + bb.width  + PAD);
+    const bot   = Math.min(1, bb.y + bb.height + PAD);
 
     const cLeft   = Math.round(left  * pw);
     const cTop    = Math.round(top   * ph);
