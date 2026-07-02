@@ -204,32 +204,47 @@ export function buildUnsplashQuery(
     DarkMoody:   "dark moody rich tones",
   };
 
-  const parts: string[] = [
-    roomTerms[roomName] ?? `${roomName.toLowerCase()} interior`,
-  ];
+  // Room base term is always first and most important — never let other
+  // attributes override it (that's what caused "study nook" to dominate
+  // Bedroom 2 searches and return desk/chair photos instead of bedrooms)
+  const base = roomTerms[roomName] ?? `${roomName.toLowerCase()} interior design`;
+  const parts: string[] = [base];
 
-  // Fold in architect's context prompt first — highest specificity
+  // Style and palette — second most important signal after room type
+  parts.push(style.toLowerCase());
+  parts.push(paletteTerms[palette] ?? "");
+
+  // Per-image angle — vary the type of shot, but keep it room-anchored
+  // Use only the angle suffix (no freeform text) to avoid drifting
+  if (imageIndex !== undefined) {
+    parts.push(imageAngle[imageIndex] ?? "");
+  }
+
+  // Architect context prompt appended AFTER core room type — it refines
+  // but can't override the fundamental room category
   if (contextPrompt?.trim()) {
     parts.push(contextPrompt.trim());
   }
 
-  // Room-specific attributes to differentiate similar rooms
-  if (room?.orientation) parts.push(room.orientation);
+  // Special features: only add if they make sense as interior search terms
+  // and only for rooms where features relate to the room itself (not sub-spaces)
+  // e.g. "attached bath" is fine, "study nook" would pull study/office photos
+  const SAFE_FEATURES: string[] = [
+    "attached bath", "ensuite", "walk-in wardrobe", "built-in wardrobe",
+    "double height", "feature wall", "fireplace", "skylight",
+    "island counter", "breakfast counter", "bay window",
+  ];
   if (room?.specialFeatures?.length) {
-    // Pick one feature per image slot to vary results
     const feat = room.specialFeatures[(imageIndex ?? 0) % room.specialFeatures.length];
-    if (feat) parts.push(feat);
+    if (feat && SAFE_FEATURES.some((sf) => feat.toLowerCase().includes(sf.toLowerCase()))) {
+      parts.push(feat);
+    }
   }
+
+  // Size hint only for very large or very small rooms
   if (room?.sizeEstimateSqm) {
-    parts.push(room.sizeEstimateSqm > 150 ? "large spacious room" : "cozy compact room");
-  }
-
-  parts.push(style.toLowerCase());
-  parts.push(paletteTerms[palette] ?? "");
-
-  // Per-image angle variation — makes each slot search for a distinct shot type
-  if (imageIndex !== undefined) {
-    parts.push(imageAngle[imageIndex] ?? "");
+    if (room.sizeEstimateSqm > 200) parts.push("spacious large room");
+    else if (room.sizeEstimateSqm < 60) parts.push("compact small room");
   }
 
   return parts.filter(Boolean).join(" ");

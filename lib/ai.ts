@@ -376,34 +376,51 @@ async function generateRoomMoodboardFromUnsplash(
   style: StyleProfile,
   contextPrompt?: string
 ): Promise<MoodImage[]> {
-  // Each image slot uses a DIFFERENT search query (different angle, feature,
-  // size hint) so rooms of the same type return visually distinct photos.
-  // We also pull from different pages so the cache doesn't deduplicate across
-  // rooms with similar queries.
+  // Strategy: make 1-2 API calls max per room instead of 4.
+  // Fetch 10 results with the base room query, then pick 4 distinct photos
+  // from that pool. Only make a second call if the first doesn't yield 4 unique results.
+  // This keeps API usage well within the 50/hour free tier even for 5-room projects.
+
+  const baseQuery = buildUnsplashQuery(
+    room.name, style.overallStyle, style.palette, contextPrompt, room, 0
+  );
+
+  let pool: MoodImage[] = [];
+
+  try {
+    // Primary fetch — page 1
+    const page1 = await searchUnsplashPhotos(baseQuery, 10, 0);
+    pool = [...page1];
+
+    // If we got fewer than 4, try page 2 with a slightly varied query
+    if (pool.length < 4) {
+      const variantQuery = buildUnsplashQuery(
+        room.name, style.overallStyle, style.palette, contextPrompt, room, 2
+      );
+      const page2 = await searchUnsplashPhotos(variantQuery, 10, 1);
+      pool = [...pool, ...page2.filter((p) => !pool.some((e) => e.url === p.url))];
+    }
+  } catch (err) {
+    console.warn(`[ai] Unsplash fetch failed for ${room.name}:`, err);
+    // Fall through to AI generation below
+  }
+
   const images: MoodImage[] = [];
   const usedUrls: string[] = [];
 
   for (let i = 0; i < 4; i++) {
-    try {
-      // Unique query per image slot — varies angle, special feature, size
-      const query = buildUnsplashQuery(
-        room.name, style.overallStyle, style.palette, contextPrompt, room, i
-      );
+    // Pick a fresh image from the pool, evenly spread across the results
+    // so we don't always pick the top 4 (avoids repetition across rooms)
+    const offset = i * Math.floor(pool.length / 4);
+    const candidate = pool.slice(offset).find((r) => !usedUrls.includes(r.url))
+      ?? pool.find((r) => !usedUrls.includes(r.url));
 
-      // Stagger page offset so similar rooms get different result sets
-      // even if the query ends up similar after deduplication
-      const pageOffset = i % 2; // alternate pages 1 and 2
-      const results = await searchUnsplashPhotos(query, 10, pageOffset);
-
-      // Pick the first result not already used in this room's moodboard
-      const fresh = results.find((r) => !usedUrls.includes(r.url)) ?? results[0];
-      if (!fresh) throw new Error("No results");
-
-      usedUrls.push(fresh.url);
-      images.push({ ...fresh, caption: ROOM_IMAGE_CAPTIONS[i], source: "unsplash" as const });
-    } catch (err) {
-      console.warn(`[ai] Unsplash slot ${i} failed for ${room.name}:`, err);
-      // Fill slot with AI generation rather than leaving it blank
+    if (candidate) {
+      usedUrls.push(candidate.url);
+      images.push({ ...candidate, caption: ROOM_IMAGE_CAPTIONS[i], source: "unsplash" as const });
+    } else {
+      // Pool exhausted — fill with AI generation
+      console.warn(`[ai] Unsplash pool exhausted at slot ${i} for ${room.name}`);
       try {
         const prompt = buildMoodboardPrompt(room, style) +
           (i === 1 ? " detail shot" : i === 2 ? " atmospheric lighting" : i === 3 ? " close-up materials" : "");
