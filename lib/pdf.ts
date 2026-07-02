@@ -128,6 +128,38 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
   return Buffer.from(await doc.save());
 }
 
+/**
+ * Rasterise every page of a generated PDF into an image (one per slide).
+ *
+ * This exists so the in-app "Review & Export" preview can show the *actual*
+ * PDF pages instead of a hand-maintained React re-implementation of the
+ * deck. Two independently-maintained renderers inevitably drift apart —
+ * this collapses them into one source of truth (buildProjectPdf), with the
+ * preview just being a picture of its real output.
+ */
+export async function rasterizePdfToPageImages(
+  pdfBuffer: Buffer,
+  density = 130
+): Promise<Buffer[]> {
+  const sharp = (await import("sharp")).default;
+
+  // Discover page count first (sharp needs an explicit page index per call).
+  const probe = (sharp as unknown as (input: Buffer, opts: object) => import("sharp").Sharp)(
+    pdfBuffer, { density }
+  );
+  const meta = await probe.metadata();
+  const pageCount = (meta as unknown as { pages?: number }).pages ?? 1;
+
+  const images: Buffer[] = [];
+  for (let i = 0; i < pageCount; i++) {
+    const buf = await (sharp as unknown as (input: Buffer, opts: object) => import("sharp").Sharp)(
+      pdfBuffer, { density, page: i }
+    ).jpeg({ quality: 82 }).toBuffer();
+    images.push(buf);
+  }
+  return images;
+}
+
 // ─── 1. Cover slide ───────────────────────────────────────────────────────────
 // Layout: left half = accent color block, right half = off-white with text
 

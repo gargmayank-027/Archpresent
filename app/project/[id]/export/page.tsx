@@ -16,6 +16,12 @@ export default function ExportPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
 
+  // Real-PDF preview — rasterised pages of the actual generated PDF, so this
+  // screen can never drift from what Export PDF Deck actually produces.
+  const [pageImages,     setPageImages]     = useState<string[] | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
+  const [previewError,   setPreviewError]   = useState(false);
+
   // Share link state
   const [shareUrl,     setShareUrl]     = useState<string | null>(null);
   const [shareExpiry,  setShareExpiry]  = useState("never");
@@ -49,12 +55,32 @@ export default function ExportPage() {
       .catch(() => setLoading(false));
   }
 
+  function loadPreview() {
+    setPreviewLoading(true);
+    setPreviewError(false);
+    fetch(`/api/export/preview?projectId=${id}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.pages && d.pages.length > 0) {
+          setPageImages(d.pages);
+        } else {
+          // Rasterisation unavailable in this environment — fall back to
+          // the JSX preview below rather than showing a blank screen.
+          setPageImages(null);
+          setPreviewError(true);
+        }
+      })
+      .catch(() => { setPageImages(null); setPreviewError(true); })
+      .finally(() => setPreviewLoading(false));
+  }
+
   useEffect(() => {
     loadProject();
+    loadPreview();
     // Re-fetch whenever the tab/window regains focus — covers the common
     // case of editing moodboards in another tab, or coming back via
     // browser back/forward (bfcache) where this effect wouldn't re-run.
-    function onFocus() { loadProject(); }
+    function onFocus() { loadProject(); loadPreview(); }
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,6 +171,7 @@ export default function ExportPage() {
       if (res.ok) {
         const data = await res.json();
         setProject((p) => p ? { ...p, analysis: data.analysis } : p);
+        loadPreview();
       }
     } catch { /* ignore */ } finally {
       setReanalysing(false);
@@ -266,9 +293,14 @@ export default function ExportPage() {
                     ? "ring-1 ring-stone-900"
                     : "hover:ring-1 hover:ring-stone-300"
                 }`}>
-                {/* Mini 16:9 thumbnail */}
-                <div className="aspect-video overflow-hidden rounded-sm relative">
-                  <SlideThumbnail slide={slide} project={project} />
+                {/* Mini 16:9 thumbnail — the real PDF page when available */}
+                <div className="aspect-video overflow-hidden rounded-sm relative bg-stone-100">
+                  {pageImages?.[i] ? (
+                    <img src={pageImages[i]} alt={slide.label}
+                      className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <SlideThumbnail slide={slide} project={project} />
+                  )}
                 </div>
                 <div className="flex items-center justify-between px-1 py-1">
                   <span className={`font-mono text-[9px] uppercase tracking-wider truncate ${
@@ -285,9 +317,23 @@ export default function ExportPage() {
 
         {/* Large slide preview — right 3 columns */}
         <div className="lg:col-span-3 space-y-4">
-          <div className="aspect-video rounded-sm overflow-hidden shadow-lg ring-1 ring-stone-200">
-            <SlidePreviewLarge slide={slides[activeSlide]} project={project} />
+          <div className="aspect-video rounded-sm overflow-hidden shadow-lg ring-1 ring-stone-200 bg-stone-100 relative">
+            {previewLoading && !pageImages ? (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="spinner" />
+              </div>
+            ) : pageImages?.[activeSlide] ? (
+              <img src={pageImages[activeSlide]} alt={slides[activeSlide]?.label}
+                className="absolute inset-0 w-full h-full object-contain" />
+            ) : (
+              <SlidePreviewLarge slide={slides[activeSlide]} project={project} />
+            )}
           </div>
+          {previewError && (
+            <p className="text-xs text-stone-400 -mt-2">
+              Showing an approximate preview — live PDF rendering isn't available in this environment.
+            </p>
+          )}
 
           {/* Slide navigation */}
           <div className="flex items-center justify-between">
