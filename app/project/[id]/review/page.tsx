@@ -19,6 +19,8 @@ export default function ReviewPage() {
   const [enhNotes,  setEnhNotes]  = useState<string[]>([]);
   const [showOriginal, setShowOriginal] = useState(false);
   const [strengths, setStrengths] = useState<string[]>([]);
+  const [selectingFloor, setSelectingFloor] = useState(false);
+  const [floorError,     setFloorError]     = useState<string | null>(null);
 
   const STEPS = [
     { num: "1", label: "Upload",     status: "complete" as const },
@@ -38,6 +40,27 @@ export default function ReviewPage() {
       })
       .catch(() => setLoading(false));
   }, [id]);
+
+  async function selectFloor(pageIndex: number) {
+    setSelectingFloor(true);
+    setFloorError(null);
+    try {
+      const res  = await fetch(`/api/projects/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selectedPageIndex: pageIndex }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not select this floor");
+      setProject(data.project);
+      setAnalysis(null);
+      setStrengths([]);
+    } catch (err) {
+      setFloorError(err instanceof Error ? err.message : "Could not select this floor");
+    } finally {
+      setSelectingFloor(false);
+    }
+  }
 
   async function runAnalysis() {
     setAnalysing(true);
@@ -105,6 +128,64 @@ export default function ReviewPage() {
 
   if (loading)  return <PageSkeleton />;
   if (!project) return <div className="p-12 text-center text-stone-400">Project not found.</div>;
+
+  // Multi-floor PDF upload — ask which floor to proceed with before showing
+  // anything else. Everything downstream (analysis, moodboards, export)
+  // works on a single active plan, so this choice has to happen first.
+  const needsFloorSelection =
+    !!project.planPages && project.planPages.length > 1 && !project.floorSelectionConfirmed;
+
+  if (needsFloorSelection) {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-12">
+        <div className="mb-10 fade-up fade-up-1">
+          <div className="flex items-center justify-between mb-8 flex-wrap gap-4">
+            <StepIndicator steps={STEPS} />
+            <p className="font-mono text-xs text-stone-400 uppercase tracking-widest">{project.clientName}</p>
+          </div>
+          <h1 className="font-display text-4xl font-light text-stone-900 mb-2"
+              style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+            Which floor should we move forward with?
+          </h1>
+          <p className="text-stone-500 text-sm">
+            This PDF has {project.planPages!.length} pages — pick the floor plan you'd like to build this presentation from.
+            You can start a new project for any other floors later.
+          </p>
+        </div>
+
+        {floorError && (
+          <div className="mb-6 border border-red-200 bg-red-50 rounded-sm px-4 py-3 text-sm text-red-600">
+            {floorError}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 fade-up fade-up-2">
+          {project.planPages!.map((page, i) => (
+            <button key={page.pageNumber} type="button"
+              disabled={selectingFloor}
+              onClick={() => selectFloor(i)}
+              className="card p-3 bg-white text-left group hover:ring-1 hover:ring-stone-900 transition-all disabled:opacity-50">
+              <div className="aspect-[4/3] bg-stone-50 rounded-sm overflow-hidden mb-3 flex items-center justify-center">
+                <img src={page.imageUrl} alt={page.label ?? `Page ${page.pageNumber}`}
+                  className="w-full h-full object-contain" />
+              </div>
+              <div className="flex items-center justify-between">
+                <p className="font-mono text-xs uppercase tracking-widest text-stone-700">
+                  {page.label ?? `Floor ${page.pageNumber}`}
+                </p>
+                <span className="font-mono text-[10px] text-stone-300">
+                  Page {page.pageNumber} / {project.planPages!.length}
+                </span>
+              </div>
+              <p className="font-mono text-[10px] text-stone-400 mt-1 group-hover:text-stone-600">
+                {selectingFloor ? "Selecting…" : "Use this floor →"}
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-12">

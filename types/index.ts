@@ -18,16 +18,27 @@ export interface PlotInfo {
   additionalNotes?: string;       // free-text: corner plot, irregular shape, setbacks, etc.
 }
 
+export interface PlanPage {
+  pageNumber: number;   // 1-indexed, matches the page's position in the source PDF
+  imageUrl: string;     // relative URL served from /uploads/
+  imagePath: string;    // absolute disk path
+  label?: string;       // e.g. "Ground Floor" — user-editable once we can infer/name it
+}
+
 export interface Project {
   id: string;
   name: string;
   clientName: string;
   firmName: string;
   createdAt: string;
-  planImageUrl: string; // relative URL served from /uploads/
-  planImagePath: string; // absolute disk path (for PDF generation)
+  planImageUrl: string; // relative URL served from /uploads/ — the ACTIVE floor plan
+  planImagePath: string; // absolute disk path (for PDF generation) — the ACTIVE floor plan
   originalPlanImageUrl?: string;  // pre-enhancement version
   enhancementNotes?: string[];    // what Sharp did to the image
+  planPages?: PlanPage[];             // all pages, populated when the upload was a multi-page PDF
+  selectedPageIndex?: number;         // which planPages[] entry is currently active (0-indexed)
+  floorSelectionConfirmed?: boolean;  // true once the architect has explicitly picked a floor
+                                       // (always true for single-page uploads — nothing to pick)
   plotInfo?: PlotInfo;  // site context captured at upload time
   analysis?: PlanAnalysis;
   planStrengths?: string[];

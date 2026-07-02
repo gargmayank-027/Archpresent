@@ -129,13 +129,13 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
 }
 
 /**
- * Rasterise every page of a generated PDF into an image (one per slide).
+ * Rasterise every page of a PDF into an image, one buffer per page.
  *
- * This exists so the in-app "Review & Export" preview can show the *actual*
- * PDF pages instead of a hand-maintained React re-implementation of the
- * deck. Two independently-maintained renderers inevitably drift apart —
- * this collapses them into one source of truth (buildProjectPdf), with the
- * preview just being a picture of its real output.
+ * Two callers:
+ *  - app/api/export/preview: rasterises the generated concept deck so the
+ *    in-app preview shows the real PDF instead of a re-implementation of it.
+ *  - app/api/projects (upload): rasterises an uploaded multi-page PDF floor
+ *    plan so each page can be offered as a separate "floor" to analyse.
  */
 export async function rasterizePdfToPageImages(
   pdfBuffer: Buffer,

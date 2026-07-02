@@ -36,6 +36,16 @@ export async function POST(req: NextRequest) {
 
     console.log(`[analyze] Starting for project: ${project.name} (${projectId})`);
 
+    // ── Multi-floor gate ─────────────────────────────────────────────────
+    // If the uploaded PDF had more than one page, the architect must pick
+    // which floor to analyse before we run anything — otherwise we'd be
+    // silently analysing whichever page happened to default to "active".
+    if (project.planPages && project.planPages.length > 1 && !project.floorSelectionConfirmed) {
+      return NextResponse.json({
+        error: "This plan has multiple floors — please choose which floor to proceed with before analysing.",
+      }, { status: 400 });
+    }
+
     // ── Mode 2: save edited strengths + optional edited analysis ──────────
     if (strengths !== undefined) {
       const updated = await projectStore.update(projectId, {
@@ -89,16 +99,10 @@ export async function POST(req: NextRequest) {
     // Step C — AI analysis
     // On Vercel, enhancedUrl is a blob URL (https://...) — pass directly.
     // Locally, it's /uploads/... — loadImageAsBase64 reads it from disk.
+    // Note: PDFs are rasterised to PNG at upload time (per floor page) and
+    // again defensively in enhancePlanImage — imageUrlForAI is always a
+    // raster image by this point, never a raw .pdf.
     const imageUrlForAI = enhanced.enhancedUrl;
-
-    // Block PDFs — Sharp on most systems cannot rasterise them.
-    // AutoCAD exports clean PNGs in 2 clicks: Plot → PNG printer.
-    const isPdf = project.planImagePath.toLowerCase().endsWith(".pdf");
-    if (isPdf) {
-      return NextResponse.json({
-        error: "PDF plans cannot be analysed. Please export your floor plan as PNG or JPEG from AutoCAD (Plot → PNG/JPEG printer) and create a new project with that file.",
-      }, { status: 400 });
-    }
 
     console.log(`[analyze] Running AI analysis on: ${imageUrlForAI}`);
     let analysis;
@@ -121,7 +125,7 @@ export async function POST(req: NextRequest) {
         : errMsg.includes("429") || errMsg.includes("QUOTA_EXHAUSTED")
         ? "Gemini rate limit hit. Please wait 60 seconds and try again."
         : errMsg.includes("400")
-        ? "Could not read the image. Make sure you uploaded a clear PNG or JPEG (not a PDF or scanned photo)."
+        ? "Could not read the image. Make sure the plan is a clear, uncorrupted PNG, JPEG, or PDF."
         : `AI analysis failed: ${errMsg}`;
       return NextResponse.json({ error: userMsg }, { status: 500 });
     }

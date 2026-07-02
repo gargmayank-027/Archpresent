@@ -12,7 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { projectStore, saveUploadedFile } from "@/lib/store";
-import type { Project, PlotInfo, PlotFacing, PropertyType, FloorLocation } from "@/types";
+import { rasterizePdfToPageImages } from "@/lib/pdf";
+import type { Project, PlotInfo, PlotFacing, PropertyType, FloorLocation, PlanPage } from "@/types";
 
 export const runtime = "nodejs";
 
@@ -39,10 +40,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Validate file type ──────────────────────────────────────────────────
-    const allowedTypes = ["image/png", "image/jpeg"];
+    const allowedTypes = ["image/png", "image/jpeg", "application/pdf"];
     if (!allowedTypes.includes(planFile.type)) {
       return NextResponse.json(
-        { error: "Plan must be PNG or JPEG. Export from AutoCAD using Plot → PNG printer." },
+        { error: "Plan must be PNG, JPEG, or PDF." },
         { status: 400 }
       );
     }
@@ -81,7 +82,51 @@ export async function POST(req: NextRequest) {
 
     const arrayBuffer = await planFile.arrayBuffer();
     const buffer      = Buffer.from(arrayBuffer);
-    const { url: planImageUrl, diskPath: planImagePath } = await saveUploadedFile(buffer, filename);
+
+    let planImageUrl: string;
+    let planImagePath: string;
+    let planPages: PlanPage[] | undefined;
+    let selectedPageIndex: number | undefined;
+    let floorSelectionConfirmed = true;
+
+    if (planFile.type === "application/pdf") {
+      // Rasterise every page up front. A PDF might be a single floor plan,
+      // or it might contain several floors (ground/first/second…) — we
+      // don't know until we look, so split unconditionally and let the
+      // Review step ask the architect which floor to proceed with when
+      // there's more than one.
+      let pageBuffers: Buffer[];
+      try {
+        pageBuffers = await rasterizePdfToPageImages(buffer, 200);
+      } catch (err) {
+        console.error("[POST /api/projects] PDF rasterisation failed:", err);
+        return NextResponse.json(
+          { error: "Could not read this PDF. Please make sure it isn't password-protected or corrupted, or export it as PNG/JPEG instead." },
+          { status: 400 }
+        );
+      }
+      if (pageBuffers.length === 0) {
+        return NextResponse.json({ error: "No pages found in this PDF." }, { status: 400 });
+      }
+
+      planPages = [];
+      for (let i = 0; i < pageBuffers.length; i++) {
+        const { url, diskPath } = await saveUploadedFile(pageBuffers[i], `plan-${id}-page${i + 1}.png`);
+        planPages.push({ pageNumber: i + 1, imageUrl: url, imagePath: diskPath });
+      }
+
+      // Default to page 1 so the project always has a valid active plan,
+      // even before the architect confirms a floor. If there's only one
+      // page there's nothing to choose, so treat it as already confirmed.
+      selectedPageIndex = 0;
+      planImageUrl  = planPages[0].imageUrl;
+      planImagePath = planPages[0].imagePath;
+      floorSelectionConfirmed = planPages.length === 1;
+    } else {
+      const saved = await saveUploadedFile(buffer, filename);
+      planImageUrl  = saved.url;
+      planImagePath = saved.diskPath;
+    }
 
     // ── Create project ──────────────────────────────────────────────────────
     const project: Project = {
@@ -92,6 +137,7 @@ export async function POST(req: NextRequest) {
       createdAt: new Date().toISOString(),
       planImageUrl,
       planImagePath,
+      ...(planPages ? { planPages, selectedPageIndex, floorSelectionConfirmed } : {}),
       plotInfo: Object.keys(plotInfo).length > 0 ? plotInfo : undefined,
       status: "created",
     };

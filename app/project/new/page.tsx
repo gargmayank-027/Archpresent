@@ -60,8 +60,8 @@ export default function NewProjectPage() {
   ];
 
   function handleFileSelect(f: File) {
-    const allowed = ["image/png", "image/jpeg"];
-    if (!allowed.includes(f.type)) { setError("Please upload a PNG or JPEG file. Export from AutoCAD using Plot → PNG printer."); return; }
+    const allowed = ["image/png", "image/jpeg", "application/pdf"];
+    if (!allowed.includes(f.type)) { setError("Please upload a PNG, JPEG, or PDF file."); return; }
     if (f.size > 20 * 1024 * 1024)  { setError("File must be under 20 MB."); return; }
     setError(null);
     setFile(f);
@@ -278,7 +278,7 @@ export default function NewProjectPage() {
               onClick={() => !file && fileInputRef.current?.click()}
               role="button" tabIndex={0}
               onKeyDown={(e) => e.key === "Enter" && fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg"
+              <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.pdf"
                 className="hidden" onChange={onFileChange} />
 
               {file ? (
@@ -312,14 +312,14 @@ export default function NewProjectPage() {
                       Drop your floor plan here, or <span className="underline underline-offset-2">browse</span>
                     </p>
                     <p className="font-mono text-[10px] text-stone-400 uppercase tracking-widest">
-                      PNG · JPEG · Max 20 MB
+                      PNG · JPEG · PDF · Max 20 MB
                     </p>
                   </div>
                 </div>
               )}
             </div>
             <p className="font-mono text-[10px] text-stone-400 mt-2 leading-relaxed">
-              Export as PNG or JPEG from AutoCAD: File → Export → PNG, or Plot → PNG/JPEG printer. Do not upload PDF.
+              PDF plans with multiple floors are supported — you'll be asked which floor to proceed with on the next step.
             </p>
           </div>
         </div>
@@ -364,10 +364,10 @@ function SectionHeader({ n, label, hint }: { n: string; label: string; hint?: st
 }
 
 function FileIcon({ type }: { type: string }) {
-  void type;
+  const label = type === "application/pdf" ? "PDF" : "IMG";
   return (
     <div className="w-10 h-10 border border-stone-200 rounded-sm flex items-center justify-center flex-shrink-0">
-      <span className="font-mono text-[10px] text-stone-500 uppercase font-medium">IMG</span>
+      <span className="font-mono text-[10px] text-stone-500 uppercase font-medium">{label}</span>
     </div>
   );
 }
