@@ -356,16 +356,18 @@ export async function generateMoodboardImage(
 export async function generateRoomMoodboard(
   room: RoomDetail,
   style: StyleProfile,
-  contextPrompt?: string
+  contextPrompt?: string,
+  roomIndex = 0  // position of this room in the generation order — used to
+                  // offset Unsplash page so similar rooms (e.g. Bedroom 2 vs
+                  // Bedroom 3) don't pull from the same cached result page
 ): Promise<MoodImage[]> {
   if (process.env.UNSPLASH_ACCESS_KEY) {
     try {
-      return await generateRoomMoodboardFromUnsplash(room, style, contextPrompt);
+      return await generateRoomMoodboardFromUnsplash(room, style, contextPrompt, roomIndex);
     } catch (err) {
       console.warn(`[ai] Unsplash failed for ${room.name}, falling back to AI generation:`, err);
     }
   }
-  // No Unsplash key configured, or it failed entirely — generate with AI instead
   return generateRoomMoodboardReal(room, style);
 }
 
@@ -374,35 +376,35 @@ const ROOM_IMAGE_CAPTIONS = ["Wide view", "Detail", "Atmosphere", "Close-up"];
 async function generateRoomMoodboardFromUnsplash(
   room: RoomDetail,
   style: StyleProfile,
-  contextPrompt?: string
+  contextPrompt?: string,
+  roomIndex = 0
 ): Promise<MoodImage[]> {
-  // Strategy: make 1-2 API calls max per room instead of 4.
-  // Fetch 10 results with the base room query, then pick 4 distinct photos
-  // from that pool. Only make a second call if the first doesn't yield 4 unique results.
-  // This keeps API usage well within the 50/hour free tier even for 5-room projects.
+  // Strategy: 1-2 API calls per room.
+  // Each room uses a different starting page (roomIndex % 3) so similar
+  // rooms (Bedroom 2 vs Bedroom 3) don't pull from the same cached result set.
 
   const baseQuery = buildUnsplashQuery(
     room.name, style.overallStyle, style.palette, contextPrompt, room, 0
   );
 
+  const startPage = roomIndex % 3; // rooms 0,1,2 → pages 0,1,2 → different result sets
+
   let pool: MoodImage[] = [];
 
   try {
-    // Primary fetch — page 1
-    const page1 = await searchUnsplashPhotos(baseQuery, 10, 0);
+    const page1 = await searchUnsplashPhotos(baseQuery, 10, startPage);
     pool = [...page1];
 
-    // If we got fewer than 4, try page 2 with a slightly varied query
+    // If pool is thin, supplement with next page
     if (pool.length < 4) {
       const variantQuery = buildUnsplashQuery(
         room.name, style.overallStyle, style.palette, contextPrompt, room, 2
       );
-      const page2 = await searchUnsplashPhotos(variantQuery, 10, 1);
+      const page2 = await searchUnsplashPhotos(variantQuery, 10, (startPage + 1) % 3);
       pool = [...pool, ...page2.filter((p) => !pool.some((e) => e.url === p.url))];
     }
   } catch (err) {
     console.warn(`[ai] Unsplash fetch failed for ${room.name}:`, err);
-    // Fall through to AI generation below
   }
 
   const images: MoodImage[] = [];
