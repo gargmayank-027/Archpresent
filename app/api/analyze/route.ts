@@ -116,10 +116,12 @@ export async function POST(req: NextRequest) {
     } catch (aiErr) {
       console.error("[analyze] AI analysis failed:", aiErr);
       const errMsg = String(aiErr);
-      const userMsg = errMsg.includes("429")
+      const userMsg = errMsg.includes("All AI providers") || errMsg.includes("rate-limited")
+        ? "All AI providers are currently busy. Please wait 60 seconds and try again — Gemini's free tier resets every minute."
+        : errMsg.includes("429") || errMsg.includes("QUOTA_EXHAUSTED")
         ? "Gemini rate limit hit. Please wait 60 seconds and try again."
         : errMsg.includes("400")
-        ? "Gemini could not read the image. Make sure you uploaded a clear PNG or JPEG (not a PDF or scanned photo)."
+        ? "Could not read the image. Make sure you uploaded a clear PNG or JPEG (not a PDF or scanned photo)."
         : `AI analysis failed: ${errMsg}`;
       return NextResponse.json({ error: userMsg }, { status: 500 });
     }

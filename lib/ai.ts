@@ -41,16 +41,56 @@ export async function analyzePlanImage(
   planImageUrl: string,
   plotInfo?: PlotInfo
 ): Promise<PlanAnalysis> {
+  // Try each provider in priority order — fall through on rate limits (429/quota)
+  // so a busy Gemini key doesn't block the whole workflow.
+
   if (process.env.GOOGLE_AI_KEY) {
-    return analyzeWithGemini(planImageUrl, plotInfo);
+    try {
+      return await analyzeWithGemini(planImageUrl, plotInfo);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("429") || msg.includes("QUOTA_EXHAUSTED") || msg.includes("rate limit")) {
+        console.warn("[ai] Gemini rate-limited — trying fallback providers…");
+        // fall through to next provider
+      } else {
+        throw err; // non-rate-limit error (bad image, etc.) — propagate
+      }
+    }
   }
+
   if (process.env.ANTHROPIC_API_KEY) {
-    return analyzeWithClaude(planImageUrl, plotInfo);
+    try {
+      console.log("[ai] Using Claude as fallback for plan analysis");
+      return await analyzeWithClaude(planImageUrl, plotInfo);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("429") || msg.includes("rate limit") || msg.includes("overloaded")) {
+        console.warn("[ai] Claude rate-limited — trying OpenAI…");
+      } else {
+        throw err;
+      }
+    }
   }
+
   if (process.env.OPENAI_API_KEY) {
-    return analyzeWithGPT4o(planImageUrl, plotInfo);
+    try {
+      console.log("[ai] Using GPT-4o as fallback for plan analysis");
+      return await analyzeWithGPT4o(planImageUrl, plotInfo);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("429") || msg.includes("rate limit")) {
+        console.warn("[ai] All AI providers rate-limited — using stub");
+      } else {
+        throw err;
+      }
+    }
   }
-  console.log("[ai] No AI key configured — using stub analysis. Set GOOGLE_AI_KEY in environment variables.");
+
+  if (process.env.GOOGLE_AI_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY) {
+    throw new Error("All AI providers are currently rate-limited. Please wait 60 seconds and try again.");
+  }
+
+  console.log("[ai] No AI key configured — using stub analysis.");
   return analyzeStub(plotInfo);
 }
 
@@ -216,9 +256,35 @@ export async function generatePlanStrengths(
   analysis: PlanAnalysis,
   plotInfo?: PlotInfo
 ): Promise<string[]> {
-  if (process.env.GOOGLE_AI_KEY) return generateStrengthsGemini(analysis, plotInfo);
-  if (process.env.ANTHROPIC_API_KEY) return generateStrengthsClaude(analysis, plotInfo);
-  if (process.env.OPENAI_API_KEY) return generateStrengthsGPT(analysis, plotInfo);
+  if (process.env.GOOGLE_AI_KEY) {
+    try {
+      return await generateStrengthsGemini(analysis, plotInfo);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("429") || msg.includes("QUOTA_EXHAUSTED") || msg.includes("rate limit")) {
+        console.warn("[ai] Gemini rate-limited for strengths — trying fallback…");
+      } else { throw err; }
+    }
+  }
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      return await generateStrengthsClaude(analysis, plotInfo);
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("429") || msg.includes("rate limit") || msg.includes("overloaded")) {
+        console.warn("[ai] Claude rate-limited for strengths — trying OpenAI…");
+      } else { throw err; }
+    }
+  }
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      return await generateStrengthsGPT(analysis, plotInfo);
+    } catch (err) {
+      const msg = String(err);
+      if (!msg.includes("429") && !msg.includes("rate limit")) throw err;
+    }
+  }
+  console.warn("[ai] All providers rate-limited for strengths — using stub");
   return strengthsStub(analysis, plotInfo);
 }
 
