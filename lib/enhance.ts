@@ -48,12 +48,15 @@ export async function enhancePlanImage(
       // a .pdf forever, and lib/planCrop.ts unconditionally refuses to crop
       // PDF sources. That silently disabled room cropping for every PDF-
       // uploaded plan (the "plans not getting cropped" bug).
+      //
+      // Note: in the normal flow, app/api/projects/route.ts already splits
+      // PDF uploads into per-page PNGs at upload time, so planImagePath
+      // should never actually be a .pdf here — this is a defensive fallback
+      // for any path that bypasses that step.
       try {
-        const rasterised = await sharpFn!(inputBuffer, { pages: 1, density: 200 })
-          .png()
-          .toBuffer();
-        notes.push("PDF rasterised to PNG (200dpi)");
-        inputBuffer = rasterised;
+        const { rasterizePdfFirstPage } = await import("@/lib/pdfRaster");
+        inputBuffer = await rasterizePdfFirstPage(inputBuffer, 2.8);
+        notes.push("PDF rasterised to PNG");
       } catch (err) {
         console.error("[enhance] PDF rasterisation failed:", err);
         return { originalUrl, enhancedUrl: originalUrl, enhancedDiskPath: planImagePath, processingNotes: ["PDF rasterisation failed — raw PDF used, cropping unavailable"] };

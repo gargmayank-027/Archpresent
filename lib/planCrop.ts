@@ -59,7 +59,8 @@ export async function cropRoomFromPlan(
     // silently refusing to crop.
     if (planImagePath.toLowerCase().endsWith(".pdf")) {
       try {
-        inputBuffer = await sharpFn!(inputBuffer, { pages: 1, density: 200 }).png().toBuffer();
+        const { rasterizePdfFirstPage } = await import("@/lib/pdfRaster");
+        inputBuffer = await rasterizePdfFirstPage(inputBuffer, 2.8);
         console.log(`[planCrop] Rasterised PDF on the fly for ${roomName}`);
       } catch (err) {
         console.warn(`[planCrop] Could not rasterise PDF for ${roomName}:`, err);

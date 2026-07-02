@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { projectStore, saveUploadedFile } from "@/lib/store";
-import { rasterizePdfToPageImages } from "@/lib/pdf";
+import { rasterizePdfPages } from "@/lib/pdfRaster";
 import type { Project, PlotInfo, PlotFacing, PropertyType, FloorLocation, PlanPage } from "@/types";
 
 export const runtime = "nodejs";
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
       // there's more than one.
       let pageBuffers: Buffer[];
       try {
-        pageBuffers = await rasterizePdfToPageImages(buffer, 200);
+        pageBuffers = await rasterizePdfPages(buffer, 2.8);
       } catch (err) {
         console.error("[POST /api/projects] PDF rasterisation failed:", err);
         return NextResponse.json(
