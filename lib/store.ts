@@ -4,7 +4,7 @@
  * Storage adapter — switches automatically between environments:
  *
  *   PRODUCTION (Vercel): Vercel Blob for EVERYTHING
- *     - access: "private" — works with both private and public stores
+ *     - access: "public" — works with both private and public stores
  *     - JSON data read back via blob.downloadUrl (signed, expires 1hr)
  *     - File uploads stored at uploads/{filename}
  *
@@ -79,7 +79,7 @@ export function ensureUploadDir() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VERCEL BLOB IMPLEMENTATION
-// Uses access: "private" — compatible with both private and public stores.
+// Uses access: "public" — compatible with both private and public stores.
 // Reads content back using the blob's downloadUrl (a short-lived signed URL).
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ async function getBlob() {
   return await import("@vercel/blob");
 }
 
-// Read a blob's content as JSON using its download URL
+// Read a blob's content as JSON — public blobs are directly fetchable
 async function readBlobJson<T>(downloadUrl: string): Promise<T | null> {
   try {
     const res = await fetch(downloadUrl, { cache: "no-store" });
@@ -106,7 +106,7 @@ const PROJECT_PREFIX = "data/project-";
 async function blob_projectCreate(project: Project): Promise<Project> {
   const { put } = await getBlob();
   await put(projectKey(project.id), JSON.stringify(project), {
-    access: "private",
+    access: "public",
     contentType: "application/json",
     addRandomSuffix: false,
   });
@@ -118,7 +118,7 @@ async function blob_projectGet(id: string): Promise<Project | null> {
     const { list } = await getBlob();
     const { blobs } = await list({ prefix: projectKey(id) });
     if (!blobs.length) return null;
-    return readBlobJson<Project>(blobs[0].downloadUrl);
+    return readBlobJson<Project>(blobs[0].url);
   } catch {
     return null;
   }
@@ -139,7 +139,7 @@ async function blob_projectList(): Promise<Project[]> {
     if (!blobs.length) return [];
 
     const projects = await Promise.all(
-      blobs.map((blob) => readBlobJson<Project>(blob.downloadUrl))
+      blobs.map((blob) => readBlobJson<Project>(blob.url))
     );
 
     return (projects.filter(Boolean) as Project[]).sort(
@@ -165,7 +165,7 @@ async function blob_firmGet(): Promise<FirmProfile | null> {
     const { list } = await getBlob();
     const { blobs } = await list({ prefix: FIRM_KEY });
     if (!blobs.length) return null;
-    return readBlobJson<FirmProfile>(blobs[0].downloadUrl);
+    return readBlobJson<FirmProfile>(blobs[0].url);
   } catch {
     return null;
   }
@@ -174,7 +174,7 @@ async function blob_firmGet(): Promise<FirmProfile | null> {
 async function blob_firmSet(profile: FirmProfile): Promise<FirmProfile> {
   const { put } = await getBlob();
   await put(FIRM_KEY, JSON.stringify(profile), {
-    access: "private",
+    access: "public",
     contentType: "application/json",
     addRandomSuffix: false,
   });
@@ -189,15 +189,11 @@ async function blob_saveFile(
 ): Promise<{ url: string; diskPath: string }> {
   const { put } = await getBlob();
   const blob = await put(`uploads/${filename}`, buffer, {
-    access: "private",
+    access: "public",
     contentType: getContentType(filename),
     addRandomSuffix: false,
   });
-  // Use a proxy URL so the file can be displayed in <img> tags.
-  // The raw blob.url requires authentication and can't be used directly
-  // in browser image tags when the store is private.
-  const proxyUrl = `/api/blob?url=${encodeURIComponent(blob.url)}`;
-  return { url: proxyUrl, diskPath: blob.url };
+  return { url: blob.url, diskPath: blob.url };
 }
 
 function getContentType(filename: string): string {
