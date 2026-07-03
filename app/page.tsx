@@ -42,7 +42,7 @@ export default function LandingPage() {
               and a polished PDF deck — in minutes, not days.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Link href="/login" className="btn-primary text-sm px-8 py-3">
+              <Link href="/signup" className="btn-primary text-sm px-8 py-3">
                 Get started free
               </Link>
               <a href="#how-it-works" className="btn-secondary text-sm px-8 py-3">
@@ -180,7 +180,7 @@ export default function LandingPage() {
                 orientation, proportions. It speaks your language so the output
                 actually makes sense to your clients.
               </p>
-              <Link href="/login" className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-amber-400 hover:text-amber-300 transition-colors">
+              <Link href="/signup" className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-amber-400 hover:text-amber-300 transition-colors">
                 Start presenting → 
               </Link>
             </div>
@@ -214,7 +214,7 @@ export default function LandingPage() {
         <p className="text-stone-500 max-w-md mx-auto mb-10">
           Set up your firm profile once. Upload a plan. Send the deck. That's it.
         </p>
-        <Link href="/login" className="btn-primary text-sm px-10 py-3.5">
+        <Link href="/signup" className="btn-primary text-sm px-10 py-3.5">
           Get started free
         </Link>
       </section>

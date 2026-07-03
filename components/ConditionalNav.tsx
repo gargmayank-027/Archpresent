@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { NavBar } from "./NavBar";
 
-const HIDE_NAV_PATHS = ["/", "/login", "/onboarding"];
+const HIDE_NAV_PATHS = ["/", "/login", "/signup", "/onboarding"];
 
 export function ConditionalNav() {
   const pathname = usePathname();

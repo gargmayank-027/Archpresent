@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 
-const NO_PADDING_PATHS = ["/", "/login", "/onboarding"];
+const NO_PADDING_PATHS = ["/", "/login", "/signup", "/onboarding"];
 
 export function ConditionalMain({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

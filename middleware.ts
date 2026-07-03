@@ -15,6 +15,7 @@ import { getToken } from "next-auth/jwt";
 const PUBLIC_PATHS = [
   "/",
   "/login",
+  "/signup",
   "/share",
   "/api/auth",
   "/api/share",
