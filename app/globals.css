@@ -597,3 +597,8 @@ a.card:active, button.card:active {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ── App pages (behind auth) need top padding for fixed navbar ───────────── */
+.app-page {
+  padding-top: 3.5rem; /* 56px = navbar height */
+}

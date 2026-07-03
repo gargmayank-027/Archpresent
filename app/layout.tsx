@@ -1,10 +1,12 @@
 /**
- * app/layout.tsx — Root layout with firm-aware nav
+ * app/layout.tsx — Root layout with auth + conditional nav
  */
 
 import type { Metadata } from "next";
 import "./globals.css";
-import { NavBar } from "@/components/NavBar";
+import { AuthProvider } from "@/components/AuthProvider";
+import { ConditionalNav } from "@/components/ConditionalNav";
+import { ConditionalMain } from "@/components/ConditionalMain";
 
 export const metadata: Metadata = {
   title: "ArchPresent — Concept Presentations for Architects",
@@ -23,14 +25,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="bg-stone-50 text-stone-900 antialiased">
-        <NavBar />
-        <main className="pt-14 min-h-screen">{children}</main>
-        <footer className="border-t border-stone-200 mt-24">
-          <div className="max-w-6xl mx-auto px-6 py-8 flex items-center justify-between">
-            <p className="text-xs font-mono text-stone-400 tracking-widest uppercase">ArchPresent v1</p>
-            <p className="text-xs font-mono text-stone-400">Residential concept presentations</p>
-          </div>
-        </footer>
+        <AuthProvider>
+          <ConditionalNav />
+          <ConditionalMain>{children}</ConditionalMain>
+        </AuthProvider>
       </body>
     </html>
   );

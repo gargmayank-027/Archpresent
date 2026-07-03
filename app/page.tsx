@@ -1,323 +1,237 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { Project, FirmProfile } from "@/types";
-import { ProjectCardMenu } from "@/components/ProjectCardMenu";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-export default function HomePage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [firm,     setFirm]     = useState<FirmProfile | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [filter,   setFilter]   = useState<"all" | "created" | "analyzed" | "styled">("all");
+export default function LandingPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
 
+  // If already logged in, go straight to dashboard
   useEffect(() => {
-    Promise.all([
-      fetch("/api/projects", { cache: "no-store" }).then((r) => r.json()),
-      fetch("/api/firm").then((r) => r.json()),
-    ]).then(([pd, fd]) => {
-      setProjects(pd.projects ?? []);
-      setFirm(fd.firm ?? null);
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
+    if (status === "authenticated") router.replace("/dashboard");
+  }, [status, router]);
 
-  const filtered = filter === "all"
-    ? projects
-    : projects.filter((p) => p.status === filter);
-
-  // Stats
-  const total    = projects.length;
-  const analyzed = projects.filter((p) => ["analyzed","styled","complete"].includes(p.status)).length;
-  const exported = projects.filter((p) => p.moodboards && p.moodboards.length > 0).length;
+  if (status === "loading") {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <span className="spinner w-5 h-5 text-stone-400" />
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-12">
+    <div className="min-h-screen">
 
-      {/* ── Hero / firm greeting ─────────────────────────────────────────── */}
-      <div className="mb-12 fade-up fade-up-1">
-        {firm ? (
-          <div className="flex items-start justify-between gap-6 flex-wrap">
-            <div>
-              <p className="font-mono text-xs tracking-widest text-stone-400 uppercase mb-2">
-                Residential · Floor Plan Presentations
-              </p>
-              <h1 className="font-display text-5xl font-light text-stone-900 leading-tight mb-3"
-                  style={{ fontFamily: "'Cormorant Garamond', serif" }}>
-                {firm.name}
-              </h1>
-              {firm.tagline && (
-                <p className="text-stone-400 text-sm font-mono tracking-wide">{firm.tagline}</p>
-              )}
-            </div>
-            <Link href="/project/new" className="btn-primary self-start mt-2">
-              <span>+</span><span>New Project</span>
-            </Link>
-          </div>
-        ) : (
-          <div className="flex items-end justify-between gap-6 flex-wrap">
-            <div>
-              <p className="font-mono text-xs tracking-widest text-stone-400 uppercase mb-4">
-                Residential · Floor Plan Presentations
-              </p>
-              <h1 className="font-display text-5xl md:text-6xl font-light text-stone-900 leading-tight mb-4"
-                  style={{ fontFamily: "'Cormorant Garamond', serif" }}>
-                From floor plan<br /><em>to client presentation</em>
-              </h1>
-              <p className="text-stone-500 text-base max-w-lg leading-relaxed">
-                Upload a floor plan, get AI-powered room analysis, interior moodboards,
-                and a polished PDF deck — in minutes.
-              </p>
-            </div>
-            <div className="flex flex-col gap-3 self-end">
-              <Link href="/project/new" className="btn-primary">
-                <span>+</span><span>New Project</span>
+      {/* ── Hero ──────────────────────────────────────────────────────────── */}
+      <section className="max-w-6xl mx-auto px-6 pt-20 pb-24">
+        <div className="grid lg:grid-cols-2 gap-16 items-center">
+          <div className="fade-up fade-up-1">
+            <p className="font-mono text-[10px] tracking-[0.25em] text-amber-700 uppercase mb-6">
+              For architecture & interior design firms
+            </p>
+            <h1 className="font-display text-5xl md:text-6xl lg:text-7xl font-light text-stone-900 leading-[1.08] mb-6"
+                style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+              From floor plan<br />
+              <em className="text-stone-500">to client presentation</em>
+            </h1>
+            <p className="text-stone-500 text-lg leading-relaxed max-w-md mb-10">
+              Upload a floor plan. Get AI-powered room analysis, curated interior moodboards,
+              and a polished PDF deck — in minutes, not days.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/login" className="btn-primary text-sm px-8 py-3">
+                Get started free
               </Link>
-              <Link href="/settings" className="btn-secondary text-center justify-center">
-                Set up firm profile
-              </Link>
+              <a href="#how-it-works" className="btn-secondary text-sm px-8 py-3">
+                See how it works
+              </a>
             </div>
           </div>
-        )}
-      </div>
 
-      {/* ── Stats row (only when projects exist) ────────────────────────── */}
-      {total > 0 && (
-        <div className="grid grid-cols-3 gap-4 mb-10 fade-up fade-up-2">
+          {/* Hero visual — stylised PDF preview mockup */}
+          <div className="fade-up fade-up-2 relative">
+            <div className="relative">
+              {/* Main deck mockup */}
+              <div className="bg-stone-900 rounded-sm overflow-hidden shadow-2xl aspect-[16/10] flex items-center justify-center">
+                <div className="text-center px-8">
+                  <div className="w-8 h-px bg-amber-500 mx-auto mb-4" />
+                  <p className="font-display text-white text-2xl font-light mb-2"
+                     style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                    Concept Presentation
+                  </p>
+                  <p className="font-mono text-stone-500 text-[9px] uppercase tracking-widest">
+                    3 BHK · East-facing · 1200 sqm
+                  </p>
+                </div>
+              </div>
+              {/* Floating mood images */}
+              <div className="absolute -bottom-4 -right-4 w-28 h-20 bg-stone-200 rounded-sm shadow-lg border border-white" />
+              <div className="absolute -bottom-8 right-12 w-24 h-18 bg-stone-300 rounded-sm shadow-lg border border-white" />
+              <div className="absolute -top-3 -left-3 w-16 h-16 bg-stone-100 rounded-sm shadow-md border border-white flex items-center justify-center">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7a7570" strokeWidth="1.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <path d="M3 16l5-5 4 4 4-4 5 5" />
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Social proof strip ────────────────────────────────────────────── */}
+      <section className="border-y border-stone-200 bg-white/50">
+        <div className="max-w-6xl mx-auto px-6 py-8">
+          <div className="grid grid-cols-3 gap-8 text-center">
+            {[
+              { num: "5 min", label: "Average time from upload to PDF" },
+              { num: "16 slides", label: "Room-by-room presentation" },
+              { num: "100%", label: "Your branding, your firm" },
+            ].map((s) => (
+              <div key={s.label}>
+                <p className="font-display text-3xl font-light text-stone-800 mb-1"
+                   style={{ fontFamily: "'Cormorant Garamond', serif" }}>{s.num}</p>
+                <p className="font-mono text-[9px] tracking-widest uppercase text-stone-400">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── How it works ──────────────────────────────────────────────────── */}
+      <section id="how-it-works" className="max-w-6xl mx-auto px-6 py-24 scroll-mt-20">
+        <div className="text-center mb-16 fade-up fade-up-2">
+          <p className="font-mono text-[10px] tracking-[0.25em] text-stone-400 uppercase mb-4">How it works</p>
+          <h2 className="font-display text-4xl font-light text-stone-900"
+              style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+            Four steps to a polished presentation
+          </h2>
+        </div>
+
+        <div className="grid md:grid-cols-4 gap-10 fade-up fade-up-3">
           {[
-            { label: "Total Projects",   value: total },
-            { label: "Plans Analysed",   value: analyzed },
-            { label: "With Moodboards",  value: exported },
-          ].map((s) => (
-            <div key={s.label} className="card p-5 text-center">
-              <p className="font-display text-4xl font-light text-stone-800 mb-1"
-                 style={{ fontFamily: "'Cormorant Garamond', serif" }}>
-                {s.value}
-              </p>
-              <p className="font-mono text-[10px] tracking-widest uppercase text-stone-400">{s.label}</p>
+            {
+              num: "01",
+              title: "Upload",
+              desc: "Drop your floor plan — PNG, JPEG, or multi-page PDF. We'll read every room, dimension, and orientation.",
+              icon: (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+              ),
+            },
+            {
+              num: "02",
+              title: "Analyse",
+              desc: "AI identifies every room, estimates dimensions, detects orientation, and drafts client-friendly strengths.",
+              icon: (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              ),
+            },
+            {
+              num: "03",
+              title: "Style",
+              desc: "Pick a style direction. AI curates real interior photos and generates moodboards for every room.",
+              icon: (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" />
+                </svg>
+              ),
+            },
+            {
+              num: "04",
+              title: "Export",
+              desc: "Download a branded 16-slide PDF deck with your firm logo, room crops, and moodboards — ready to send.",
+              icon: (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" />
+                </svg>
+              ),
+            },
+          ].map((step) => (
+            <div key={step.num} className="text-center">
+              <div className="w-12 h-12 rounded-full border border-stone-200 flex items-center justify-center mx-auto mb-4 text-stone-400">
+                {step.icon}
+              </div>
+              <p className="font-mono text-[10px] tracking-widest uppercase text-amber-600 mb-2">{step.num}</p>
+              <p className="font-mono text-xs tracking-widest uppercase text-stone-800 mb-3">{step.title}</p>
+              <p className="text-sm text-stone-500 leading-relaxed">{step.desc}</p>
             </div>
           ))}
         </div>
-      )}
+      </section>
 
-      {/* ── Projects section ─────────────────────────────────────────────── */}
-      <div className="fade-up fade-up-2">
-        <div className="flex items-center gap-4 mb-6 flex-wrap">
-          <span className="font-mono text-xs tracking-widest text-stone-400 uppercase">Projects</span>
-          <div className="flex-1 h-px bg-stone-200" />
-
-          {/* Filter pills */}
-          {total > 0 && (
-            <div className="flex gap-1">
-              {(["all", "created", "analyzed", "styled"] as const).map((f) => (
-                <button key={f} type="button"
-                  onClick={() => setFilter(f)}
-                  className={`filter-pill ${filter === f ? "active" : ""}`}>
-                  {f === "all" ? `All (${total})` : f}
-                </button>
-              ))}
+      {/* ── Features ──────────────────────────────────────────────────────── */}
+      <section className="bg-stone-900 text-white">
+        <div className="max-w-6xl mx-auto px-6 py-24">
+          <div className="grid lg:grid-cols-2 gap-16 items-start">
+            <div>
+              <p className="font-mono text-[10px] tracking-[0.25em] text-amber-400 uppercase mb-4">Built for architects</p>
+              <h2 className="font-display text-4xl font-light leading-tight mb-6"
+                  style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                Everything your practice needs to present concepts beautifully
+              </h2>
+              <p className="text-stone-400 leading-relaxed mb-8">
+                ArchPresent understands residential floor plans — rooms, circulation,
+                orientation, proportions. It speaks your language so the output
+                actually makes sense to your clients.
+              </p>
+              <Link href="/login" className="inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-widest text-amber-400 hover:text-amber-300 transition-colors">
+                Start presenting → 
+              </Link>
             </div>
-          )}
-        </div>
 
-        {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1,2,3].map((i) => (
-              <div key={i} className="card p-0 overflow-hidden">
-                <div className="skeleton h-40 w-full" />
-                <div className="p-5 space-y-2">
-                  <div className="skeleton h-4 w-2/3" />
-                  <div className="skeleton h-3 w-1/2" />
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : filtered.length === 0 && total === 0 ? (
-          <EmptyState />
-        ) : filtered.length === 0 ? (
-          <div className="py-16 text-center">
-            <p className="font-mono text-xs text-stone-400 uppercase tracking-widest">
-              No {filter} projects
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((project, i) => (
-              <ProjectCard
-                key={project.id}
-                project={project}
-                delay={i}
-                onDeleted={(id) => setProjects((prev) => prev.filter((p) => p.id !== id))}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── How it works ─────────────────────────────────────────────────── */}
-      {total === 0 && !loading && (
-        <div className="mt-20 fade-up fade-up-4">
-          <div className="flex items-center gap-4 mb-10">
-            <span className="font-mono text-xs tracking-widest text-stone-400 uppercase">How it works</span>
-            <div className="flex-1 h-px bg-stone-200" />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {[
-              { num: "01", title: "Upload",    desc: "Upload your floor plan as PNG or PDF from AutoCAD." },
-              { num: "02", title: "Analyse",   desc: "AI reads the plan, identifies rooms, and drafts client-friendly strengths." },
-              { num: "03", title: "Style",     desc: "Answer 4 questions. AI generates interior moodboards for key rooms." },
-              { num: "04", title: "Export",    desc: "Download a polished PDF deck with your firm branding, ready to send." },
-            ].map((step) => (
-              <div key={step.num} className="space-y-3">
-                <p className="font-mono text-2xl text-stone-200">{step.num}</p>
-                <p className="font-mono text-xs tracking-widest uppercase text-stone-700">{step.title}</p>
-                <p className="text-sm text-stone-500 leading-relaxed">{step.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Project card ─────────────────────────────────────────────────────────────
-
-function ProjectCard({
-  project,
-  delay,
-  onDeleted,
-}: {
-  project: Project;
-  delay: number;
-  onDeleted: (id: string) => void;
-}) {
-  const STATUS_LABEL: Record<string, string> = {
-    created:  "Uploaded",
-    analyzed: "Analysed",
-    styled:   "Styled",
-    complete: "Complete",
-  };
-  const STATUS_DOT: Record<string, string> = {
-    created:  "bg-stone-300",
-    analyzed: "bg-amber-400",
-    styled:   "bg-amber-500",
-    complete: "bg-green-500",
-  };
-
-  const nextStep = (status: string) => {
-    if (status === "created")  return `/project/${project.id}/review`;
-    if (status === "analyzed") return `/project/${project.id}/moodboards`;
-    return `/project/${project.id}/export`;
-  };
-
-  // Plot tags
-  const tags: string[] = [];
-  if (project.plotInfo?.numberOfBedrooms) tags.push(`${project.plotInfo.numberOfBedrooms} BHK`);
-  if (project.plotInfo?.facing)           tags.push(project.plotInfo.facing);
-  if (project.plotInfo?.propertyType)     tags.push(project.plotInfo.propertyType);
-
-  return (
-    <div className="fade-up relative"
-      style={{ animationDelay: `${0.04 + delay * 0.05}s`, opacity: 0 }}>
-
-      {/* Three-dot menu — positioned outside the card's overflow boundary */}
-      <div className="absolute top-[calc(11rem+12px)] right-3 z-20">
-        <ProjectCardMenu project={project} onDeleted={onDeleted} />
-      </div>
-
-      <Link href={nextStep(project.status)}
-        className="card block group hover:border-stone-400 transition-all">
-
-        {/* Plan thumbnail */}
-        <div className="h-44 bg-stone-50 overflow-hidden relative border-b border-stone-100 rounded-t-[3px]">
-          <img src={project.planImageUrl} alt={project.name}
-            className="w-full h-full object-contain p-3 group-hover:scale-[1.03] transition-transform duration-500"
-            style={{ imageRendering: "crisp-edges" }} />
-
-          {/* Moodboard strip — if any exist */}
-          {project.moodboards && project.moodboards.length > 0 && (
-            <div className="absolute bottom-0 left-0 right-0 flex h-10 overflow-hidden">
-              {project.moodboards.slice(0, 3).map((mb) => (
-                <div key={mb.roomName} className="flex-1 overflow-hidden">
-                  <img src={mb.imageUrl} alt={mb.roomName}
-                    className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+            <div className="grid grid-cols-2 gap-4">
+              {[
+                { title: "AI room detection", desc: "Reads plans like an architect — bedrooms, kitchen, lobby, pooja room, all identified." },
+                { title: "Real interior photos", desc: "Unsplash-sourced photography, not synthetic renders. Every image credits the photographer." },
+                { title: "Your brand, your deck", desc: "Firm logo, accent colors, typography choices. Every PDF looks like it came from your practice." },
+                { title: "Multi-floor PDF", desc: "Upload a multi-page PDF. Pick the floor, get the presentation. One plan per project." },
+                { title: "Editable plan crops", desc: "AI crops each room from the plan. Not perfect? Drag to adjust the framing yourself." },
+                { title: "Share with clients", desc: "Generate a link. Clients view the presentation in their browser — no PDF download needed." },
+              ].map((f) => (
+                <div key={f.title} className="p-4 border border-stone-700/50 rounded-sm">
+                  <p className="font-mono text-[10px] tracking-widest uppercase text-stone-300 mb-2">{f.title}</p>
+                  <p className="text-sm text-stone-500 leading-relaxed">{f.desc}</p>
                 </div>
               ))}
             </div>
-          )}
-
-          {/* Live share indicator */}
-          {project.shareToken && project.shareEnabled && (
-            <span className="absolute top-2 left-2 flex items-center gap-1 bg-white/90 backdrop-blur-sm px-1.5 py-0.5 rounded-sm">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
-              <span className="font-mono text-[8px] text-stone-500 uppercase tracking-wider">Live</span>
-            </span>
-          )}
-        </div>
-
-        {/* Card body */}
-        <div className="p-4">
-          <div className="flex items-start justify-between gap-2 mb-2 pr-8">
-            <h3 className="text-sm font-medium text-stone-900 group-hover:text-stone-700 transition-colors leading-snug min-w-0 truncate">
-              {project.name}
-            </h3>
-            <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
-              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[project.status]}`} />
-              <span className="font-mono text-[9px] tracking-widest uppercase text-stone-400">
-                {STATUS_LABEL[project.status]}
-              </span>
-            </div>
           </div>
+        </div>
+      </section>
 
-        <p className="font-mono text-[10px] text-stone-400 uppercase tracking-wide mb-2">
-          {project.clientName}
+      {/* ── CTA ───────────────────────────────────────────────────────────── */}
+      <section className="max-w-6xl mx-auto px-6 py-24 text-center">
+        <p className="font-mono text-[10px] tracking-[0.25em] text-stone-400 uppercase mb-4">Ready?</p>
+        <h2 className="font-display text-4xl md:text-5xl font-light text-stone-900 mb-6"
+            style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+          Your next concept presentation<br /><em className="text-stone-500">starts here</em>
+        </h2>
+        <p className="text-stone-500 max-w-md mx-auto mb-10">
+          Set up your firm profile once. Upload a plan. Send the deck. That's it.
         </p>
+        <Link href="/login" className="btn-primary text-sm px-10 py-3.5">
+          Get started free
+        </Link>
+      </section>
 
-        {/* Plot tags */}
-        {tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
-            {tags.map((tag) => (
-              <span key={tag}
-                className="px-1.5 py-0.5 bg-stone-100 rounded-sm font-mono text-[9px] text-stone-500 uppercase tracking-wider">
-                {tag}
-              </span>
-            ))}
+      {/* ── Footer ────────────────────────────────────────────────────────── */}
+      <footer className="border-t border-stone-200">
+        <div className="max-w-6xl mx-auto px-6 py-10 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10px] tracking-[0.2em] text-stone-400 uppercase">Arch</span>
+            <span className="w-px h-3 bg-stone-300" />
+            <span className="font-display text-lg font-light text-stone-600" style={{ fontFamily: "'Cormorant Garamond', serif" }}>Present</span>
           </div>
-        )}
-
-        <div className="flex items-center justify-between mt-1">
-          <p className="font-mono text-[10px] text-stone-300">
-            {new Date(project.createdAt).toLocaleDateString("en-GB", {
-              day: "numeric", month: "short", year: "numeric",
-            })}
+          <p className="font-mono text-[10px] text-stone-400 tracking-widest uppercase">
+            Residential concept presentations for architecture firms
           </p>
-          <span className="font-mono text-[9px] text-stone-400 group-hover:text-stone-600 transition-colors">
-            Continue →
-          </span>
         </div>
-      </div>
-    </Link>
-    </div>
-  );
-}
-
-// ─── Empty state ──────────────────────────────────────────────────────────────
-
-function EmptyState() {
-  return (
-    <div className="fade-up fade-up-3 border border-dashed border-stone-200 rounded-sm py-20 text-center">
-      <div className="w-12 h-12 border border-stone-200 rounded-sm flex items-center justify-center mx-auto mb-4">
-        <svg className="w-5 h-5 text-stone-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
-            d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-        </svg>
-      </div>
-      <p className="font-mono text-xs tracking-widest text-stone-400 uppercase mb-3">No projects yet</p>
-      <p className="text-stone-400 text-sm mb-6">Create your first project to get started.</p>
-      <Link href="/project/new" className="btn-primary inline-flex">
-        <span>+</span><span>New Project</span>
-      </Link>
+      </footer>
     </div>
   );
 }

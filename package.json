@@ -12,6 +12,7 @@
   "dependencies": {
     "@vercel/blob": "^0.23.4",
     "next": "14.2.5",
+    "next-auth": "^4.24.7",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.6.82",
     "react": "^18",
