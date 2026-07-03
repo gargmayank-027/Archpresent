@@ -129,25 +129,42 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
 }
 
 /**
- * Rasterise every page of a PDF into an image, one buffer per page.
+ * Rasterise every page of a generated PDF into an image, one buffer per page.
  *
- * Two callers:
- *  - app/api/export/preview: rasterises the generated concept deck so the
- *    in-app preview shows the real PDF instead of a re-implementation of it.
- *  - app/api/projects (upload): rasterises an uploaded multi-page PDF floor
- *    plan so each page can be offered as a separate "floor" to analyse.
- *
- * Delegates to lib/pdfRaster (pdfjs-dist + @napi-rs/canvas) rather than
- * sharp — sharp's prebuilt binaries don't include a PDF codec on Vercel,
- * so sharp-based PDF decoding fails there with "Input buffer contains
- * unsupported image format" regardless of whether the PDF is valid.
+ * Used by app/api/export/preview to show the actual PDF pages in the
+ * Review & Export screen. This is NOT for uploaded floor plan PDFs (those
+ * are rasterised client-side). The PDF here is one we generated ourselves
+ * with pdf-lib — a simple vector/image PDF that sharp *may* be able to
+ * handle (depends on the libvips build). If sharp can't do it, fall back
+ * gracefully and let the caller use the JSX preview instead.
  */
 export async function rasterizePdfToPageImages(
   pdfBuffer: Buffer,
-  _density = 130
+  density = 130
 ): Promise<Buffer[]> {
-  const { rasterizePdfPages } = await import("@/lib/pdfRaster");
-  return rasterizePdfPages(pdfBuffer, 2.2);
+  try {
+    const sharp = (await import("sharp")).default;
+
+    const probe = (sharp as unknown as (input: Buffer, opts: object) => import("sharp").Sharp)(
+      pdfBuffer, { density }
+    );
+    const meta = await probe.metadata();
+    const pageCount = (meta as unknown as { pages?: number }).pages ?? 1;
+
+    const images: Buffer[] = [];
+    for (let i = 0; i < pageCount; i++) {
+      const buf = await (sharp as unknown as (input: Buffer, opts: object) => import("sharp").Sharp)(
+        pdfBuffer, { density, page: i }
+      ).jpeg({ quality: 82 }).toBuffer();
+      images.push(buf);
+    }
+    return images;
+  } catch (err) {
+    // Sharp can't handle PDFs in this environment (expected on Vercel) —
+    // return empty array so the caller falls back to the JSX preview.
+    console.warn("[pdf] Export preview rasterisation unavailable:", String(err));
+    return [];
+  }
 }
 
 // ─── 1. Cover slide ───────────────────────────────────────────────────────────

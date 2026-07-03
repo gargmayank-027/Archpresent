@@ -1494,21 +1494,11 @@ async function loadImageAsBase64(
 async function rasterisePdf(
   pdfPath: string
 ): Promise<{ base64: string; mediaType: "image/jpeg" } | null> {
-  try {
-    const { readFileSync } = await import("fs");
-    const { rasterizePdfFirstPage } = await import("@/lib/pdfRaster");
-    const pdfBuffer = readFileSync(pdfPath);
-    const pngBuffer = await rasterizePdfFirstPage(pdfBuffer, 2.8);
-    // Re-encode as JPEG to match this function's declared return type and
-    // keep the payload smaller for the vision API call.
-    const sharp = (await import("sharp")).default;
-    const buffer = await sharp(pngBuffer).jpeg({ quality: 90 }).toBuffer();
-    console.log(`[ai] PDF rasterised: ${(buffer.length / 1024).toFixed(0)} KB`);
-    return await shrinkIfNeeded(buffer, "image/jpeg");
-  } catch (err) {
-    console.warn("[ai] PDF rasterisation failed:", String(err));
-    return null;
-  }
+  // PDFs are rasterised to PNG client-side (browser canvas) before
+  // reaching analysis. If a raw PDF path somehow gets here, we can't
+  // rasterise server-side (no PDF codec available on Vercel).
+  console.warn(`[ai] Cannot rasterise PDF server-side: ${pdfPath}. PDFs should be converted to PNG client-side before analysis.`);
+  return null;
 }
 
 async function shrinkIfNeeded(

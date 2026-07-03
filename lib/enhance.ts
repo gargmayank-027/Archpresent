@@ -44,23 +44,12 @@ export async function enhancePlanImage(
     const notes: string[] = [];
 
     if (ext === "pdf") {
-      // Rasterise the PDF to a PNG first — without this, planImagePath stays
-      // a .pdf forever, and lib/planCrop.ts unconditionally refuses to crop
-      // PDF sources. That silently disabled room cropping for every PDF-
-      // uploaded plan (the "plans not getting cropped" bug).
-      //
-      // Note: in the normal flow, app/api/projects/route.ts already splits
-      // PDF uploads into per-page PNGs at upload time, so planImagePath
-      // should never actually be a .pdf here — this is a defensive fallback
-      // for any path that bypasses that step.
-      try {
-        const { rasterizePdfFirstPage } = await import("@/lib/pdfRaster");
-        inputBuffer = await rasterizePdfFirstPage(inputBuffer, 2.8);
-        notes.push("PDF rasterised to PNG");
-      } catch (err) {
-        console.error("[enhance] PDF rasterisation failed:", err);
-        return { originalUrl, enhancedUrl: originalUrl, enhancedDiskPath: planImagePath, processingNotes: ["PDF rasterisation failed — raw PDF used, cropping unavailable"] };
-      }
+      // PDFs are split into single-page PDFs at upload time and rasterised
+      // to PNG client-side (browser canvas) before analysis. If a raw PDF
+      // path somehow reaches this function, we can't rasterise it server-
+      // side (sharp doesn't have a PDF codec on Vercel), so just pass it
+      // through and let the caller handle it.
+      return { originalUrl, enhancedUrl: originalUrl, enhancedDiskPath: planImagePath, processingNotes: ["PDF — enhancement skipped (rasterised client-side)"] };
     }
     const meta  = await sharpFn!(inputBuffer).metadata();
     const { width = 1000, height = 1000 } = meta;

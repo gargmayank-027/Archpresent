@@ -1,111 +1,81 @@
 /**
  * lib/pdfRaster.ts
  *
- * Rasterises PDF pages to PNG buffers using pdfjs-dist + @napi-rs/canvas
- * instead of sharp.
+ * Server-side PDF page splitting using pdf-lib (pure JS, zero native deps).
  *
- * WHY NOT SHARP: sharp's PDF support depends on the underlying libvips
- * being compiled with a PDF codec (PDFium or poppler). The prebuilt sharp
- * binaries pulled in by `npm install` on Vercel do NOT include one — sharp
- * fails on every PDF with "Input buffer contains unsupported image format",
- * regardless of whether the PDF itself is valid. There's no config fix for
- * this on Vercel: serverless functions can't install a system libvips with
- * PDF support, so this isn't an environment misconfiguration, it's sharp
- * being the wrong tool for this specific job in this specific environment.
+ * PREVIOUS APPROACH (failed): sharp → libvips has no PDF codec on Vercel.
+ * SECOND ATTEMPT (failed): pdfjs-dist + @napi-rs/canvas → native .node
+ * binary can't be bundled by webpack, and @napi-rs/canvas isn't available
+ * at runtime in Vercel's serverless environment.
  *
- * pdfjs-dist parses PDFs in pure JS (Mozilla's PDF.js — no native PDF
- * codec needed at all), and @napi-rs/canvas provides the Canvas 2D surface
- * to render into via prebuilt N-API binaries (no compilation step, unlike
- * the classic `canvas` package which needs system Cairo and routinely
- * fails to build on Vercel).
- *
- * sharp is still used everywhere else in this codebase for actual raster
- * image processing (resize, sharpen, crop, format conversion) — none of
- * that touches the PDF codec, so it's unaffected by this issue.
+ * CURRENT APPROACH: Don't rasterise on the server at all.
+ *  - pdf-lib (pure JS, already a dependency) splits multi-page PDFs into
+ *    single-page PDF buffers. No rendering, no native deps.
+ *  - Client-side (browser), pdfjs-dist renders each page to a native
+ *    <canvas> element for the floor picker preview.
+ *  - When the architect picks a floor, the client renders it at high
+ *    resolution, converts to PNG via canvas.toBlob(), and uploads the PNG
+ *    back to the server — giving us a clean raster image for AI analysis,
+ *    cropping, and everything downstream that expects a PNG/JPEG.
  */
 
-let pdfjsLib: typeof import("pdfjs-dist/legacy/build/pdf.mjs") | null = null;
-let napiCanvas: typeof import("@napi-rs/canvas") | null = null;
-
-async function loadDeps() {
-  if (!pdfjsLib) {
-    pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  }
-  if (!napiCanvas) {
-    napiCanvas = await import("@napi-rs/canvas");
-  }
-  return { pdfjsLib, napiCanvas };
-}
+import { PDFDocument } from "pdf-lib";
 
 export class PdfRasterUnavailableError extends Error {}
 
 /**
- * Rasterise every page of a PDF buffer into a PNG buffer.
- *
- * @param scale  Render scale — 1.0 ≈ 72dpi (PDF's native unit). Use ~2.2
- *               for crisp on-screen previews, ~3 for AI analysis where
- *               small room labels need to stay legible.
+ * Split a multi-page PDF into individual single-page PDF buffers.
+ * Returns one Buffer per page, each a valid standalone PDF.
  */
-export async function rasterizePdfPages(
-  pdfBuffer: Buffer,
-  scale = 2.2
-): Promise<Buffer[]> {
-  let deps;
-  try {
-    deps = await loadDeps();
-  } catch (err) {
-    throw new PdfRasterUnavailableError(
-      `PDF rendering dependencies not available (pdfjs-dist / @napi-rs/canvas): ${String(err)}`
-    );
-  }
-  const { pdfjsLib: pdfjs, napiCanvas: canvasLib } = deps;
+export async function splitPdfPages(pdfBuffer: Buffer): Promise<Buffer[]> {
+  const srcDoc = await PDFDocument.load(pdfBuffer);
+  const pageCount = srcDoc.getPageCount();
 
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(pdfBuffer),
-    // No filesystem/worker access needed in a Node serverless function —
-    // keep this fully synchronous/in-process.
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    disableFontFace: true,
-  });
-
-  const doc = await loadingTask.promise;
-  const images: Buffer[] = [];
-
-  try {
-    for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
-      const page = await doc.getPage(pageNum);
-      const viewport = page.getViewport({ scale });
-
-      const canvas = canvasLib.createCanvas(
-        Math.ceil(viewport.width),
-        Math.ceil(viewport.height)
-      );
-      const ctx = canvas.getContext("2d");
-
-      // White background — architectural PDFs are usually transparent/white
-      // already, but this avoids a black canvas fallback on any page that
-      // isn't fully opaque.
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      await page.render({
-        canvasContext: ctx as unknown as CanvasRenderingContext2D,
-        viewport,
-      }).promise;
-
-      images.push(canvas.toBuffer("image/png"));
-    }
-  } finally {
-    await doc.destroy();
+  if (pageCount === 0) {
+    throw new Error("PDF has no pages");
   }
 
-  return images;
+  const pages: Buffer[] = [];
+
+  for (let i = 0; i < pageCount; i++) {
+    const newDoc = await PDFDocument.create();
+    const [copiedPage] = await newDoc.copyPages(srcDoc, [i]);
+    newDoc.addPage(copiedPage);
+    const bytes = await newDoc.save();
+    pages.push(Buffer.from(bytes));
+  }
+
+  return pages;
 }
 
-/** Convenience: rasterise just the first page (used where only one is needed). */
-export async function rasterizePdfFirstPage(pdfBuffer: Buffer, scale = 2.2): Promise<Buffer> {
-  const pages = await rasterizePdfPages(pdfBuffer, scale);
-  if (pages.length === 0) throw new Error("PDF has no pages");
-  return pages[0];
+/** Get the number of pages in a PDF without splitting it. */
+export async function getPdfPageCount(pdfBuffer: Buffer): Promise<number> {
+  const doc = await PDFDocument.load(pdfBuffer);
+  return doc.getPageCount();
+}
+
+// ── Legacy exports kept for backward compat with lib/enhance.ts and
+//    lib/planCrop.ts defensive paths. These should never actually run in
+//    the normal flow now (PDFs are split into single-page PDFs at upload
+//    time, then rasterised to PNG client-side before analysis), but if
+//    they do, they throw a clear error rather than silently failing.
+
+export async function rasterizePdfPages(
+  _pdfBuffer: Buffer,
+  _scale?: number
+): Promise<Buffer[]> {
+  throw new PdfRasterUnavailableError(
+    "Server-side PDF rasterisation is not available in this environment. " +
+    "PDFs should be rasterised client-side (browser canvas) before upload."
+  );
+}
+
+export async function rasterizePdfFirstPage(
+  _pdfBuffer: Buffer,
+  _scale?: number
+): Promise<Buffer> {
+  throw new PdfRasterUnavailableError(
+    "Server-side PDF rasterisation is not available in this environment. " +
+    "PDFs should be rasterised client-side (browser canvas) before upload."
+  );
 }

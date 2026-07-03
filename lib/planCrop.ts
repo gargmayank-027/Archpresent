@@ -53,19 +53,12 @@ export async function cropRoomFromPlan(
       inputBuffer = readFileSync(planImagePath);
     }
 
-    // Defensive fallback: normally lib/enhance.ts rasterises PDFs to PNG
-    // before this ever runs, so planImagePath shouldn't be a .pdf here. But
-    // if enhancement was disabled/failed, rasterise on the fly rather than
-    // silently refusing to crop.
+    // PDFs are rasterised to PNG client-side before analysis, so
+    // planImagePath should never be a .pdf here. If it somehow is,
+    // we can't rasterise server-side — just skip the crop.
     if (planImagePath.toLowerCase().endsWith(".pdf")) {
-      try {
-        const { rasterizePdfFirstPage } = await import("@/lib/pdfRaster");
-        inputBuffer = await rasterizePdfFirstPage(inputBuffer, 2.8);
-        console.log(`[planCrop] Rasterised PDF on the fly for ${roomName}`);
-      } catch (err) {
-        console.warn(`[planCrop] Could not rasterise PDF for ${roomName}:`, err);
-        return null;
-      }
+      console.warn(`[planCrop] Skipping crop for ${roomName} — raw PDF path reached server`);
+      return null;
     }
 
     const meta = await sharpFn!(inputBuffer).metadata();

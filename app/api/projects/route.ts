@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { projectStore, saveUploadedFile } from "@/lib/store";
-import { rasterizePdfPages } from "@/lib/pdfRaster";
+import { splitPdfPages } from "@/lib/pdfRaster";
 import type { Project, PlotInfo, PlotFacing, PropertyType, FloorLocation, PlanPage } from "@/types";
 
 export const runtime = "nodejs";
@@ -97,9 +97,9 @@ export async function POST(req: NextRequest) {
       // there's more than one.
       let pageBuffers: Buffer[];
       try {
-        pageBuffers = await rasterizePdfPages(buffer, 2.8);
+        pageBuffers = await splitPdfPages(buffer);
       } catch (err) {
-        console.error("[POST /api/projects] PDF rasterisation failed:", err);
+        console.error("[POST /api/projects] PDF splitting failed:", err);
         return NextResponse.json(
           { error: "Could not read this PDF. Please make sure it isn't password-protected or corrupted, or export it as PNG/JPEG instead." },
           { status: 400 }
@@ -109,9 +109,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "No pages found in this PDF." }, { status: 400 });
       }
 
+      // Store each page as a single-page PDF. The client-side floor picker
+      // will render these to canvas (using pdfjs-dist in the browser) and
+      // upload a PNG of the selected floor — that PNG becomes the plan image
+      // used for AI analysis, cropping, and everything downstream.
       planPages = [];
       for (let i = 0; i < pageBuffers.length; i++) {
-        const { url, diskPath } = await saveUploadedFile(pageBuffers[i], `plan-${id}-page${i + 1}.png`);
+        const { url, diskPath } = await saveUploadedFile(pageBuffers[i], `plan-${id}-page${i + 1}.pdf`);
         planPages.push({ pageNumber: i + 1, imageUrl: url, imagePath: diskPath });
       }
 

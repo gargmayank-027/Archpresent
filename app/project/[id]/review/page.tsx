@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
 import type { Project, PlanAnalysis, PlotInfo } from "@/types";
@@ -45,17 +45,51 @@ export default function ReviewPage() {
     setSelectingFloor(true);
     setFloorError(null);
     try {
-      const res  = await fetch(`/api/projects/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selectedPageIndex: pageIndex }),
+      const page = project!.planPages![pageIndex];
+
+      // 1. Render the PDF page to a canvas using pdfjs-dist in the browser
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+      const pdfRes = await fetch(page.imageUrl);
+      const pdfData = new Uint8Array(await pdfRes.arrayBuffer());
+      const doc = await pdfjsLib.getDocument({ data: pdfData }).promise;
+      const pdfPage = await doc.getPage(1); // single-page PDF, always page 1
+
+      // Render at 3x scale for crisp AI analysis (small labels must stay legible)
+      const viewport = pdfPage.getViewport({ scale: 3 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+
+      // 2. Convert canvas to PNG blob
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => b ? resolve(b) : reject(new Error("Canvas to blob failed")),
+          "image/png"
+        );
       });
+
+      // 3. Upload the PNG to the server
+      const fd = new FormData();
+      fd.append("selectedPageIndex", String(pageIndex));
+      fd.append("planImage", blob, `floor-${pageIndex + 1}.png`);
+
+      const res = await fetch(`/api/projects/${id}/select-floor`, { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not select this floor");
+
       setProject(data.project);
       setAnalysis(null);
       setStrengths([]);
+
+      doc.destroy();
     } catch (err) {
+      console.error("Floor selection failed:", err);
       setFloorError(err instanceof Error ? err.message : "Could not select this floor");
     } finally {
       setSelectingFloor(false);
@@ -166,8 +200,7 @@ export default function ReviewPage() {
               onClick={() => selectFloor(i)}
               className="card p-3 bg-white text-left group hover:ring-1 hover:ring-stone-900 transition-all disabled:opacity-50">
               <div className="aspect-[4/3] bg-stone-50 rounded-sm overflow-hidden mb-3 flex items-center justify-center">
-                <img src={page.imageUrl} alt={page.label ?? `Page ${page.pageNumber}`}
-                  className="w-full h-full object-contain" />
+                <PdfPageThumb pdfUrl={page.imageUrl} />
               </div>
               <div className="flex items-center justify-between">
                 <p className="font-mono text-xs uppercase tracking-widest text-stone-700">
@@ -684,5 +717,50 @@ function PageSkeleton() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Renders a single-page PDF to a <canvas> element using pdfjs-dist in the browser. */
+
+function PdfPageThumb({ pdfUrl }: { pdfUrl: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendered  = useRef(false);
+
+  const renderPdf = useCallback(async (canvas: HTMLCanvasElement | null) => {
+    if (!canvas || rendered.current) return;
+    rendered.current = true;
+    canvasRef.current = canvas;
+
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+      const res     = await fetch(pdfUrl);
+      const data    = new Uint8Array(await res.arrayBuffer());
+      const doc     = await pdfjsLib.getDocument({ data }).promise;
+      const page    = await doc.getPage(1);
+
+      // Fit into the thumbnail container (scale ~1.5 is enough for a preview)
+      const viewport = page.getViewport({ scale: 1.5 });
+      canvas.width   = viewport.width;
+      canvas.height  = viewport.height;
+
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      doc.destroy();
+    } catch (err) {
+      console.error("PDF thumbnail render failed:", err);
+    }
+  }, [pdfUrl]);
+
+  return (
+    <canvas
+      ref={renderPdf}
+      className="w-full h-full object-contain"
+      style={{ maxWidth: "100%", maxHeight: "100%" }}
+    />
   );
 }

@@ -21,10 +21,9 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: "25mb",
     },
-    // @napi-rs/canvas ships a native .node binary that webpack can't parse.
-    // Marking it (and sharp) as external keeps them as runtime `require()`
-    // calls instead of trying to bundle the binary through webpack.
-    serverComponentsExternalPackages: ["@napi-rs/canvas", "sharp"],
+    // sharp ships native .node binaries that webpack can't parse.
+    // Marking it as external keeps it as a runtime `require()` call.
+    serverComponentsExternalPackages: ["sharp"],
   },
 };
 
