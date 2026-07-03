@@ -1,24 +1,21 @@
+"use client";
+
 /**
  * components/PlanCropEditor.tsx
  *
- * DEFAULT: shows the existing cropped snippet image with an "Adjust" button.
- * EDIT MODE: shows the full plan, zoomed+panned to the current crop region,
- * with drag-to-pan and scroll-to-zoom. Saves the new crop via API.
+ * DEFAULT: cropped snippet image + "Adjust" button.
+ * EDIT: full plan rendered via CSS background-image (no distortion),
+ * user drags to pan, scrolls to zoom. Saves re-cropped snippet via API.
  *
- * Key fixes vs previous version:
- *  - No distortion: image dimensions are calculated from natural aspect
- *    ratio + container measurements, never stretched independently.
- *  - Starts from current crop position, not zoomed-out full plan.
- *  - Stays in edit mode until the new snippet is confirmed by the parent.
+ * State model: zoom (single scalar), panX/panY (normalised 0-1 center).
+ * No independent vw/vh — zoom is uniform, aspect ratio is never broken.
  */
-
-"use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
 
 interface Box { x: number; y: number; width: number; height: number }
 
-interface PlanCropEditorProps {
+interface Props {
   planImageUrl: string;
   snippetUrl?: string;
   initialBox?: Box;
@@ -29,164 +26,169 @@ interface PlanCropEditorProps {
 }
 
 export function PlanCropEditor({
-  planImageUrl,
-  snippetUrl,
-  initialBox,
-  roomName,
-  roomSize,
-  onSave,
-  saving,
-}: PlanCropEditorProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [editing, setEditing]     = useState(false);
-  const [dragging, setDragging]   = useState(false);
-  const [imgNat, setImgNat]       = useState<{ w: number; h: number } | null>(null);
-  const [cSize, setCSize]         = useState({ w: 200, h: 200 });
-  const [saved, setSaved]         = useState(false); // true after save completes
+  planImageUrl, snippetUrl, initialBox, roomName, roomSize, onSave, saving,
+}: Props) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [editing, setEditing] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [imgNat, setImgNat] = useState<{ w: number; h: number } | null>(null);
+  const [cW, setCW] = useState(200);
+  const [cH, setCH] = useState(200);
+  const waitingForSave = useRef(false);
 
-  // Viewport: normalised 0-1 region of the plan visible in the editor
-  const [vx, setVx] = useState(initialBox?.x ?? 0);
-  const [vy, setVy] = useState(initialBox?.y ?? 0);
-  const [vw, setVw] = useState(initialBox?.width ?? 1);
-  const [vh, setVh] = useState(initialBox?.height ?? 1);
+  // State: zoom (1 = full width visible, 2 = half visible, etc.)
+  // panX/panY: normalised center of visible region (0-1 in image coords)
+  const initZoom = initialBox ? 1 / initialBox.width : 1;
+  const initPanX = initialBox ? initialBox.x + initialBox.width / 2 : 0.5;
+  const initPanY = initialBox ? initialBox.y + initialBox.height / 2 : 0.5;
 
-  const dragStart = useRef({ mx: 0, my: 0, vx: 0, vy: 0 });
+  const [zoom, setZoom] = useState(initZoom);
+  const [panX, setPanX] = useState(initPanX);
+  const [panY, setPanY] = useState(initPanY);
 
-  // Load natural image dimensions
+  const drag = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+
+  // Load image natural size
   useEffect(() => {
     const img = new Image();
     img.onload = () => setImgNat({ w: img.naturalWidth, h: img.naturalHeight });
     img.src = planImageUrl;
   }, [planImageUrl]);
 
-  // Measure container on mount + resize
+  // Measure container
   useEffect(() => {
-    const el = containerRef.current;
+    const el = ref.current;
     if (!el) return;
-    const measure = () => setCSize({ w: el.clientWidth, h: el.clientHeight });
-    measure();
-    const ro = new ResizeObserver(measure);
+    const m = () => { setCW(el.clientWidth); setCH(el.clientHeight); };
+    m();
+    const ro = new ResizeObserver(m);
     ro.observe(el);
     return () => ro.disconnect();
   }, [editing]);
 
-  // When entering edit mode, snap viewport to current box
+  // Snap to initialBox when entering edit mode
   useEffect(() => {
-    if (editing && initialBox) {
-      setVx(initialBox.x);
-      setVy(initialBox.y);
-      setVw(initialBox.width);
-      setVh(initialBox.height);
+    if (editing) {
+      const z = initialBox ? 1 / initialBox.width : 1;
+      const px = initialBox ? initialBox.x + initialBox.width / 2 : 0.5;
+      const py = initialBox ? initialBox.y + initialBox.height / 2 : 0.5;
+      setZoom(z); setPanX(px); setPanY(py);
     }
   }, [editing]);
 
-  // When saving finishes and we have a new snippet, exit edit mode
-  const prevSaving = useRef(saving);
+  // Exit edit mode when save completes (snippetUrl changes)
   useEffect(() => {
-    if (prevSaving.current && !saving && saved) {
+    if (waitingForSave.current && !saving) {
+      waitingForSave.current = false;
       setEditing(false);
-      setSaved(false);
     }
-    prevSaving.current = saving;
-  }, [saving, saved]);
+  }, [saving, snippetUrl]);
 
-  // Sync if initialBox changes externally (e.g. re-analysis) while not editing
-  useEffect(() => {
-    if (!editing && initialBox) {
-      setVx(initialBox.x);
-      setVy(initialBox.y);
-      setVw(initialBox.width);
-      setVh(initialBox.height);
-    }
-  }, [initialBox?.x, initialBox?.y, initialBox?.width, initialBox?.height]);
-
-  const clamp = useCallback((x: number, y: number, w: number, h: number) => {
-    const cw = Math.max(0.05, Math.min(1, w));
-    const ch = Math.max(0.05, Math.min(1, h));
+  // ── Derived: background-image rendering (pixel-based, no distortion) ──
+  const getRendering = useCallback(() => {
+    if (!imgNat) return { bgSize: "contain", bgPos: "center" };
+    // At current zoom, the image width in pixels:
+    const imgW = cW * zoom;
+    const imgH = imgW * (imgNat.h / imgNat.w); // aspect ratio preserved
+    // The center of the viewport (panX, panY) maps to the center of the container
+    const bgX = cW / 2 - panX * imgW;
+    const bgY = cH / 2 - panY * imgH;
     return {
-      x: Math.max(0, Math.min(1 - cw, x)),
-      y: Math.max(0, Math.min(1 - ch, y)),
-      w: cw, h: ch,
+      bgSize: `${imgW}px ${imgH}px`,
+      bgPos: `${bgX}px ${bgY}px`,
     };
-  }, []);
+  }, [imgNat, cW, cH, zoom, panX, panY]);
 
-  // ── Drag ──────────────────────────────────────────────────────────────
+  // ── Clamp pan so image edges don't pull away from container ──
+  const clampPan = useCallback((px: number, py: number, z: number) => {
+    if (!imgNat) return { px, py };
+    const halfVisW = 1 / z / 2; // half of visible width in normalised coords
+    const imgH = cW * z * (imgNat.h / imgNat.w);
+    const halfVisH = (cH / imgH) / 2;
+    return {
+      px: Math.max(halfVisW, Math.min(1 - halfVisW, px)),
+      py: Math.max(halfVisH, Math.min(1 - halfVisH, py)),
+    };
+  }, [imgNat, cW, cH]);
+
+  // ── To bounding box for saving ──
+  function toBox(): Box {
+    const w = 1 / zoom;
+    const h = imgNat ? (cH / (cW * zoom * (imgNat.h / imgNat.w))) : w;
+    const x = panX - w / 2;
+    const y = panY - h / 2;
+    return {
+      x: Math.max(0, x),
+      y: Math.max(0, y),
+      width: Math.min(1, w),
+      height: Math.min(1, h),
+    };
+  }
+
+  // ── Drag ──
   function onPointerDown(e: React.PointerEvent) {
     if (!editing) return;
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     setDragging(true);
-    dragStart.current = { mx: e.clientX, my: e.clientY, vx, vy };
+    drag.current = { mx: e.clientX, my: e.clientY, px: panX, py: panY };
   }
   function onPointerMove(e: React.PointerEvent) {
     if (!dragging || !imgNat) return;
-    const { w: dispW, h: dispH } = getDisplayDims();
-    const dx = (e.clientX - dragStart.current.mx) / dispW;
-    const dy = (e.clientY - dragStart.current.my) / dispH;
-    const c = clamp(dragStart.current.vx - dx * vw, dragStart.current.vy - dy * vh, vw, vh);
-    setVx(c.x); setVy(c.y);
+    const imgW = cW * zoom;
+    const imgH = imgW * (imgNat.h / imgNat.w);
+    const dx = (e.clientX - drag.current.mx) / imgW;
+    const dy = (e.clientY - drag.current.my) / imgH;
+    const c = clampPan(drag.current.px - dx, drag.current.py - dy, zoom);
+    setPanX(c.px); setPanY(c.py);
   }
   function onPointerUp() { setDragging(false); }
 
-  // ── Zoom (native non-passive wheel) ───────────────────────────────────
+  // ── Zoom (native non-passive wheel) ──
   useEffect(() => {
-    const el = containerRef.current;
+    const el = ref.current;
     if (!el || !editing) return;
     function handleWheel(e: WheelEvent) {
       e.preventDefault();
       e.stopPropagation();
-      const factor = e.deltaY > 0 ? 1.12 : 0.89;
-      const nw = vw * factor, nh = vh * factor;
+      const factor = e.deltaY > 0 ? 0.88 : 1.15;
+      const newZoom = Math.max(1, Math.min(20, zoom * factor));
+      // Zoom toward pointer position
       const rect = el!.getBoundingClientRect();
-      const px = (e.clientX - rect.left) / rect.width;
-      const py = (e.clientY - rect.top) / rect.height;
-      const planX = vx + px * vw, planY = vy + py * vh;
-      const c = clamp(planX - px * nw, planY - py * nh, nw, nh);
-      setVx(c.x); setVy(c.y); setVw(c.w); setVh(c.h);
+      const mx = (e.clientX - rect.left) / rect.width;
+      const my = (e.clientY - rect.top) / rect.height;
+      // The point under the pointer in normalised image coords:
+      const visW = 1 / zoom;
+      const imgH_px = cW * zoom * (imgNat ? imgNat.h / imgNat.w : 1);
+      const visH = cH / imgH_px;
+      const ptX = panX + (mx - 0.5) * visW;
+      const ptY = panY + (my - 0.5) * visH;
+      // After zoom, keep that point under the pointer
+      const newVisW = 1 / newZoom;
+      const newImgH = cW * newZoom * (imgNat ? imgNat.h / imgNat.w : 1);
+      const newVisH = cH / newImgH;
+      const newPx = ptX - (mx - 0.5) * newVisW;
+      const newPy = ptY - (my - 0.5) * newVisH;
+      const c = clampPan(newPx, newPy, newZoom);
+      setZoom(newZoom); setPanX(c.px); setPanY(c.py);
     }
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
-  }, [editing, vx, vy, vw, vh, clamp]);
+  }, [editing, zoom, panX, panY, imgNat, cW, cH, clampPan]);
 
-  // ── Pixel-accurate image placement (no distortion) ────────────────────
-  function getDisplayDims() {
-    if (!imgNat) return { w: cSize.w, h: cSize.h };
-    const fitScale = Math.min(cSize.w / imgNat.w, cSize.h / imgNat.h);
-    return { w: imgNat.w * fitScale, h: imgNat.h * fitScale };
-  }
-
-  function getImgStyle(): React.CSSProperties {
-    if (!imgNat) return { width: "100%", height: "100%", objectFit: "contain" as const };
-    const { w: fitW, h: fitH } = getDisplayDims();
-    const zoom = 1 / vw;
-    const dispW = fitW * zoom;
-    const dispH = fitH * zoom;
-    const left = -vx * dispW + Math.max(0, (cSize.w - dispW) / 2);
-    const top  = -vy * dispH + Math.max(0, (cSize.h - dispH) / 2);
-    return {
-      position: "absolute" as const,
-      width: dispW, height: dispH,
-      left, top,
-      imageRendering: "crisp-edges" as const,
-      pointerEvents: "none" as const,
-      userSelect: "none" as const,
-      transition: dragging ? "none" : "left 0.1s ease-out, top 0.1s ease-out, width 0.1s ease-out, height 0.1s ease-out",
-    };
-  }
-
-  // ── Actions ────────────────────────────────────────────────────────────
+  // ── Actions ──
   function handleSave() {
-    setSaved(true);
-    onSave({ x: vx, y: vy, width: vw, height: vh });
-    // Don't setEditing(false) — wait for saving to complete (parent updates snippetUrl)
+    waitingForSave.current = true;
+    onSave(toBox());
   }
   function handleReset() {
-    if (initialBox) { setVx(initialBox.x); setVy(initialBox.y); setVw(initialBox.width); setVh(initialBox.height); }
-    else { setVx(0); setVy(0); setVw(1); setVh(1); }
+    const z = initialBox ? 1 / initialBox.width : 1;
+    const px = initialBox ? initialBox.x + initialBox.width / 2 : 0.5;
+    const py = initialBox ? initialBox.y + initialBox.height / 2 : 0.5;
+    setZoom(z); setPanX(px); setPanY(py);
   }
-  function handleCancel() { handleReset(); setEditing(false); }
 
-  // ── DEFAULT VIEW ──────────────────────────────────────────────────────
+  // ── DEFAULT VIEW ──
   if (!editing) {
     return (
       <div>
@@ -207,39 +209,47 @@ export function PlanCropEditor({
           <div className="px-2 py-1.5 border-t border-stone-100">
             <p className="font-mono text-[9px] text-stone-400 truncate">{roomName}</p>
             {roomSize && <p className="font-mono text-[9px] text-stone-300">{roomSize} m²</p>}
-            {!snippetUrl && <p className="font-mono text-[8px] text-stone-300 mt-0.5">Click Adjust to isolate this room</p>}
+            {!snippetUrl && <p className="font-mono text-[8px] text-stone-300 mt-0.5">Click Adjust to isolate</p>}
           </div>
         </div>
       </div>
     );
   }
 
-  // ── EDIT VIEW ─────────────────────────────────────────────────────────
-  const zoomPct = Math.round(100 / vw);
+  // ── EDIT VIEW ──
+  const { bgSize, bgPos } = getRendering();
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
         <p className="font-mono text-[9px] text-amber-600 uppercase tracking-widest font-medium">Editing crop</p>
-        <span className="font-mono text-[8px] text-stone-400">{zoomPct}%</span>
+        <span className="font-mono text-[8px] text-stone-400">{Math.round(zoom * 100)}%</span>
       </div>
 
       <div
-        ref={containerRef}
+        ref={ref}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
-        className={`border-2 border-amber-400 ring-2 ring-amber-100 rounded-sm overflow-hidden bg-stone-50 relative ${
+        className={`border-2 border-amber-400 ring-2 ring-amber-100 rounded-sm overflow-hidden relative select-none ${
           dragging ? "cursor-grabbing" : "cursor-grab"
         }`}
-        style={{ height: "200px", touchAction: "none" }}
+        style={{
+          height: "200px",
+          touchAction: "none",
+          backgroundImage: `url(${planImageUrl})`,
+          backgroundSize: bgSize,
+          backgroundPosition: bgPos,
+          backgroundRepeat: "no-repeat",
+          backgroundColor: "#fafaf8",
+          imageRendering: "crisp-edges",
+          transition: dragging ? "none" : "background-size 0.15s ease-out, background-position 0.15s ease-out",
+        }}
       >
-        <img src={planImageUrl} alt={`${roomName} plan — editing`} draggable={false} style={getImgStyle()} />
-
         {!dragging && (
           <div className="absolute inset-0 flex items-end justify-center pb-2 pointer-events-none">
-            <span className="bg-black/50 text-white font-mono text-[8px] px-2 py-1 rounded-sm uppercase tracking-wider backdrop-blur-sm">
+            <span className="bg-black/50 text-white font-mono text-[8px] px-2.5 py-1 rounded-sm uppercase tracking-wider backdrop-blur-sm">
               Drag to pan · Scroll to zoom
             </span>
           </div>
@@ -255,7 +265,7 @@ export function PlanCropEditor({
           className="font-mono text-[9px] uppercase tracking-widest text-stone-400 px-3 py-2 border border-stone-200 rounded-sm hover:bg-stone-50 transition-colors">
           Reset
         </button>
-        <button type="button" onClick={handleCancel} disabled={saving}
+        <button type="button" onClick={() => { handleReset(); setEditing(false); }} disabled={saving}
           className="font-mono text-[9px] uppercase tracking-widest text-stone-400 px-3 py-2 hover:text-stone-600 transition-colors">
           Cancel
         </button>
