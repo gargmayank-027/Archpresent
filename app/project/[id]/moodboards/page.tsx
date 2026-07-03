@@ -686,6 +686,7 @@ function RoomSection({
         <div className="col-span-1">
           <PlanCropEditor
             planImageUrl={project.planImageUrl}
+            snippetUrl={room.planSnippetUrl}
             initialBox={roomDetail?.boundingBox}
             roomName={room.roomName}
             roomSize={roomDetail?.sizeEstimateSqm?.toString()}
