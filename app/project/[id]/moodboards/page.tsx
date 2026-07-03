@@ -423,7 +423,7 @@ export default function MoodboardsPage() {
               <p className="text-[10px] text-stone-400 leading-relaxed">
                 Select spaces to include. Add a brief for any space you want to personalise.
               </p>
-              <div className="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+              <div className="space-y-1.5 max-h-80 filmstrip pr-1">
                 {allDetectedRooms().map((room) => {
                   const isWorthy = (room as any).moodboardWorthy !== false;
                   const isSelected = selectedRooms[room.name] ?? isWorthy;

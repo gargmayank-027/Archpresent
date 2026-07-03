@@ -29,7 +29,7 @@ export function NavBar() {
 
   return (
     <>
-      <header className="fixed top-0 left-0 right-0 z-50 border-b border-stone-200 bg-stone-50/90 backdrop-blur-sm">
+      <header className="fixed top-0 left-0 right-0 z-50 border-b border-stone-200/70 bg-stone-50/85 backdrop-blur-md backdrop-saturate-150">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
 
           {/* Logo / wordmark */}
@@ -66,10 +66,10 @@ export function NavBar() {
               { href: "/settings",    label: "Settings" },
             ].map((link) => (
               <a key={link.href} href={link.href}
-                className={`px-3 py-1.5 font-mono text-[10px] tracking-widest uppercase rounded-sm transition-colors relative ${
+                className={`px-3 py-1.5 font-mono text-[10px] tracking-widest uppercase rounded-sm transition-all duration-150 relative ${
                   isActive(link.href)
-                    ? "text-stone-900 bg-stone-100"
-                    : "text-stone-400 hover:text-stone-700 hover:bg-stone-100/60"
+                    ? "text-stone-900 bg-stone-200/60"
+                    : "text-stone-400 hover:text-stone-700 hover:bg-stone-100"
                 }`}>
                 {link.label}
                 {/* Dot badge on Settings when no firm profile exists */}

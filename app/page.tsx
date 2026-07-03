@@ -112,11 +112,7 @@ export default function HomePage() {
               {(["all", "created", "analyzed", "styled"] as const).map((f) => (
                 <button key={f} type="button"
                   onClick={() => setFilter(f)}
-                  className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest rounded-sm transition-colors ${
-                    filter === f
-                      ? "bg-stone-900 text-white"
-                      : "bg-stone-100 text-stone-400 hover:text-stone-700"
-                  }`}>
+                  className={`filter-pill ${filter === f ? "active" : ""}`}>
                   {f === "all" ? `All (${total})` : f}
                 </button>
               ))}

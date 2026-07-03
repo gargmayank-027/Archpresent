@@ -284,7 +284,7 @@ export default function ExportPage() {
           <p className="font-mono text-[10px] uppercase tracking-widest text-stone-400 mb-3">
             Slides ({slides.length})
           </p>
-          <div className="space-y-1.5 max-h-[520px] overflow-y-auto pr-1">
+          <div className="space-y-1.5 filmstrip pr-1">
             {slides.map((slide, i) => (
               <button key={i} type="button"
                 onClick={() => setActiveSlide(i)}
@@ -339,7 +339,7 @@ export default function ExportPage() {
           <div className="flex items-center justify-between">
             <button type="button" onClick={() => setActiveSlide(Math.max(0, activeSlide - 1))}
               disabled={activeSlide === 0}
-              className="btn-secondary disabled:opacity-30 py-1.5 px-4 text-xs">
+              className="slide-nav-btn">
               ← Prev
             </button>
             <span className="font-mono text-xs text-stone-400">
@@ -347,7 +347,7 @@ export default function ExportPage() {
             </span>
             <button type="button" onClick={() => setActiveSlide(Math.min(slides.length - 1, activeSlide + 1))}
               disabled={activeSlide === slides.length - 1}
-              className="btn-secondary disabled:opacity-30 py-1.5 px-4 text-xs">
+              className="slide-nav-btn">
               Next →
             </button>
           </div>
