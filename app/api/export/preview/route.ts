@@ -14,6 +14,7 @@ import { projectStore } from "@/lib/store";
 import { buildProjectPdf, rasterizePdfToPageImages } from "@/lib/pdf";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
