@@ -218,51 +218,57 @@ function ProjectCard({
   if (project.plotInfo?.propertyType)     tags.push(project.plotInfo.propertyType);
 
   return (
-    <Link href={nextStep(project.status)}
-      className="card overflow-hidden group hover:border-stone-400 transition-all hover:shadow-sm fade-up relative"
+    <div className="fade-up relative"
       style={{ animationDelay: `${0.04 + delay * 0.05}s`, opacity: 0 }}>
 
-      {/* Plan thumbnail */}
-      <div className="h-44 bg-stone-50 overflow-hidden relative border-b border-stone-100">
-        <img src={project.planImageUrl} alt={project.name}
-          className="w-full h-full object-contain p-3 group-hover:scale-[1.03] transition-transform duration-500"
-          style={{ imageRendering: "crisp-edges" }} />
-
-        {/* Moodboard strip — if any exist */}
-        {project.moodboards && project.moodboards.length > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 flex h-10 overflow-hidden">
-            {project.moodboards.slice(0, 3).map((mb) => (
-              <div key={mb.roomName} className="flex-1 overflow-hidden">
-                <img src={mb.imageUrl} alt={mb.roomName}
-                  className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Live share indicator */}
-        {project.shareToken && project.shareEnabled && (
-          <span className="absolute top-2 left-2 flex items-center gap-1 bg-white/90 backdrop-blur-sm px-1.5 py-0.5 rounded-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
-            <span className="font-mono text-[8px] text-stone-500 uppercase tracking-wider">Live</span>
-          </span>
-        )}
+      {/* Three-dot menu — positioned outside the card's overflow boundary */}
+      <div className="absolute top-[calc(11rem+12px)] right-3 z-20">
+        <ProjectCardMenu project={project} onDeleted={onDeleted} />
       </div>
 
-      {/* Card body */}
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <h3 className="text-sm font-medium text-stone-900 group-hover:text-stone-700 transition-colors leading-snug min-w-0 truncate">
-            {project.name}
-          </h3>
-          <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
-            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[project.status]}`} />
-            <span className="font-mono text-[9px] tracking-widest uppercase text-stone-400">
-              {STATUS_LABEL[project.status]}
+      <Link href={nextStep(project.status)}
+        className="card block group hover:border-stone-400 transition-all">
+
+        {/* Plan thumbnail */}
+        <div className="h-44 bg-stone-50 overflow-hidden relative border-b border-stone-100 rounded-t-[3px]">
+          <img src={project.planImageUrl} alt={project.name}
+            className="w-full h-full object-contain p-3 group-hover:scale-[1.03] transition-transform duration-500"
+            style={{ imageRendering: "crisp-edges" }} />
+
+          {/* Moodboard strip — if any exist */}
+          {project.moodboards && project.moodboards.length > 0 && (
+            <div className="absolute bottom-0 left-0 right-0 flex h-10 overflow-hidden">
+              {project.moodboards.slice(0, 3).map((mb) => (
+                <div key={mb.roomName} className="flex-1 overflow-hidden">
+                  <img src={mb.imageUrl} alt={mb.roomName}
+                    className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Live share indicator */}
+          {project.shareToken && project.shareEnabled && (
+            <span className="absolute top-2 left-2 flex items-center gap-1 bg-white/90 backdrop-blur-sm px-1.5 py-0.5 rounded-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+              <span className="font-mono text-[8px] text-stone-500 uppercase tracking-wider">Live</span>
             </span>
-            <ProjectCardMenu project={project} onDeleted={onDeleted} />
-          </div>
+          )}
         </div>
+
+        {/* Card body */}
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-2 mb-2 pr-8">
+            <h3 className="text-sm font-medium text-stone-900 group-hover:text-stone-700 transition-colors leading-snug min-w-0 truncate">
+              {project.name}
+            </h3>
+            <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${STATUS_DOT[project.status]}`} />
+              <span className="font-mono text-[9px] tracking-widest uppercase text-stone-400">
+                {STATUS_LABEL[project.status]}
+              </span>
+            </div>
+          </div>
 
         <p className="font-mono text-[10px] text-stone-400 uppercase tracking-wide mb-2">
           {project.clientName}
@@ -292,6 +298,7 @@ function ProjectCard({
         </div>
       </div>
     </Link>
+    </div>
   );
 }
 

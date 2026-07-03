@@ -407,68 +407,77 @@ export default function MoodboardsPage() {
             <div className="card p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <p className="font-mono text-[10px] tracking-widest text-stone-400 uppercase">05 — Spaces</p>
-                <div className="flex gap-2">
+                <div className="flex gap-3">
                   <button type="button"
-                    className="font-mono text-[9px] text-stone-400 hover:text-stone-600 underline"
+                    className="font-mono text-[9px] text-stone-400 hover:text-stone-700 transition-colors"
                     onClick={() => { const a: Record<string, boolean> = {}; allDetectedRooms().forEach((r) => { a[r.name] = true; }); setSelectedRooms(a); }}>
-                    All
+                    Select all
                   </button>
+                  <span className="text-stone-200">|</span>
                   <button type="button"
-                    className="font-mono text-[9px] text-stone-400 hover:text-stone-600 underline"
+                    className="font-mono text-[9px] text-stone-400 hover:text-stone-700 transition-colors"
                     onClick={() => { const a: Record<string, boolean> = {}; allDetectedRooms().forEach((r) => { a[r.name] = false; }); setSelectedRooms(a); }}>
-                    None
+                    Clear
                   </button>
                 </div>
               </div>
-              <p className="text-[10px] text-stone-400 leading-relaxed">
-                Select spaces to include. Add a brief for any space you want to personalise.
-              </p>
-              <div className="space-y-1.5 max-h-80 filmstrip pr-1">
+
+              {/* Compact room list */}
+              <div className="border border-stone-200 rounded-sm divide-y divide-stone-100 max-h-80 filmstrip">
                 {allDetectedRooms().map((room) => {
                   const isWorthy = (room as any).moodboardWorthy !== false;
                   const isSelected = selectedRooms[room.name] ?? isWorthy;
                   return (
-                    <div key={room.name} className={`border rounded-sm transition-all ${isSelected ? "border-stone-300 bg-white" : "border-stone-100 bg-stone-50 opacity-50"}`}>
-                      <label className="flex items-start gap-2.5 p-2.5 cursor-pointer select-none">
+                    <div key={room.name}
+                      className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${
+                        isSelected ? "bg-white" : "bg-stone-50/50"
+                      }`}>
+                      {/* Checkbox */}
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => setSelectedRooms((p) => ({ ...p, [room.name]: e.target.checked }))}
+                        disabled={generating}
+                        className="accent-stone-800 flex-shrink-0"
+                      />
+
+                      {/* Room name + meta */}
+                      <div className="w-28 flex-shrink-0">
+                        <span className={`font-mono text-[10px] uppercase tracking-wider block leading-tight ${
+                          isSelected ? "text-stone-800 font-medium" : "text-stone-400"
+                        }`}>
+                          {room.name}
+                        </span>
+                        <span className="font-mono text-[9px] text-stone-400 leading-tight">
+                          {[
+                            room.sizeEstimateSqm ? `~${room.sizeEstimateSqm}m²` : null,
+                            room.orientation,
+                            !isWorthy ? "utility" : null,
+                          ].filter(Boolean).join(" · ") || "\u00A0"}
+                        </span>
+                      </div>
+
+                      {/* Inline brief input — only shown when selected */}
+                      {isSelected ? (
                         <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => setSelectedRooms((p) => ({ ...p, [room.name]: e.target.checked }))}
+                          type="text"
+                          className="flex-1 min-w-0 bg-stone-50 border border-stone-200 rounded-sm px-2.5 py-1.5 font-sans text-[11px] text-stone-700 placeholder:text-stone-300 outline-none focus:border-stone-400 focus:bg-white transition-colors"
+                          placeholder="Optional brief…"
+                          value={contextPrompts[room.name] ?? ""}
+                          onChange={(e) => setContextPrompts((p) => ({ ...p, [room.name]: e.target.value }))}
                           disabled={generating}
-                          className="mt-0.5 accent-stone-800 flex-shrink-0"
+                          onClick={(e) => e.stopPropagation()}
                         />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-mono text-[10px] uppercase tracking-wider text-stone-700 font-medium">{room.name}</span>
-                            {room.sizeEstimateSqm && (
-                              <span className="font-mono text-[9px] text-stone-400">~{room.sizeEstimateSqm}m²</span>
-                            )}
-                            {room.orientation && (
-                              <span className="font-mono text-[9px] text-stone-400">{room.orientation}</span>
-                            )}
-                            {!isWorthy && (
-                              <span className="font-mono text-[8px] text-stone-300 border border-stone-200 px-1 rounded-sm">utility</span>
-                            )}
-                          </div>
-                          {isSelected && (
-                            <textarea
-                              className="field-input text-[11px] resize-none mt-1.5 w-full"
-                              rows={1}
-                              placeholder="Optional brief, e.g. warm wood tones, statement ceiling…"
-                              value={contextPrompts[room.name] ?? ""}
-                              onChange={(e) => setContextPrompts((p) => ({ ...p, [room.name]: e.target.value }))}
-                              disabled={generating}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          )}
-                        </div>
-                      </label>
+                      ) : (
+                        <div className="flex-1" />
+                      )}
                     </div>
                   );
                 })}
               </div>
+
               <p className="font-mono text-[9px] text-stone-400">
-                {targetRoomNames().length} space{targetRoomNames().length !== 1 ? "s" : ""} selected for moodboard
+                {targetRoomNames().length} space{targetRoomNames().length !== 1 ? "s" : ""} selected
               </p>
             </div>
           )}
@@ -765,18 +774,23 @@ function MoodImageTile({
           onClick={() => handleAction("photo")}
           disabled={!!busy}
           title="Try a different real photo"
-          className="w-6 h-6 rounded-sm bg-white/90 hover:bg-white text-stone-600 flex items-center justify-center text-[10px] transition-colors"
+          className="w-7 h-7 rounded-sm bg-white/90 hover:bg-white text-stone-500 hover:text-stone-800 flex items-center justify-center transition-colors shadow-sm"
         >
-          🔀
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="1 4 1 10 7 10" /><polyline points="23 20 23 14 17 14" />
+            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+          </svg>
         </button>
         <button
           type="button"
           onClick={() => handleAction("ai")}
           disabled={!!busy}
           title="Generate with AI instead"
-          className="w-6 h-6 rounded-sm bg-white/90 hover:bg-white text-stone-600 flex items-center justify-center text-[10px] transition-colors"
+          className="w-7 h-7 rounded-sm bg-white/90 hover:bg-white text-stone-500 hover:text-stone-800 flex items-center justify-center transition-colors shadow-sm"
         >
-          ✨
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
+          </svg>
         </button>
       </div>
     </div>

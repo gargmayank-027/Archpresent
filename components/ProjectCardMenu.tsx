@@ -126,8 +126,10 @@ export function ProjectCardMenu({ project, onDeleted }: ProjectCardMenuProps) {
       <button
         type="button"
         onClick={toggleMenu}
-        className={`w-6 h-6 flex items-center justify-center rounded-sm transition-colors ${
-          open ? "bg-stone-200 text-stone-700" : "text-stone-400 hover:bg-stone-100 hover:text-stone-600"
+        className={`w-8 h-8 flex items-center justify-center rounded-sm border transition-all ${
+          open
+            ? "bg-stone-200 text-stone-700 border-stone-300"
+            : "bg-white text-stone-400 border-stone-200 hover:bg-stone-100 hover:text-stone-600 hover:border-stone-300 shadow-sm"
         }`}
         aria-label="Project options"
         aria-expanded={open}
@@ -141,7 +143,8 @@ export function ProjectCardMenu({ project, onDeleted }: ProjectCardMenuProps) {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute right-0 top-7 z-20 w-44 bg-white border border-stone-200 rounded-sm shadow-lg overflow-hidden fade-up fade-up-1">
+        <div className="absolute right-0 top-9 z-30 w-44 bg-white border border-stone-200 rounded-sm overflow-hidden fade-up fade-up-1"
+          style={{ boxShadow: "0 4px 16px rgba(26,25,23,0.10), 0 2px 4px rgba(26,25,23,0.06)" }}>
           {!confirming ? (
             <>
               {/* Edit */}
