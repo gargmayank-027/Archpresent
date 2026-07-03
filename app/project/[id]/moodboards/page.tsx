@@ -627,7 +627,6 @@ function RoomSection({
   onSnippetUpdate: (roomName: string, snippetUrl: string) => void;
 }) {
   const [regenerating, setRegenerating] = useState(false);
-  const [cropSaving, setCropSaving] = useState(false);
   const roomDetail = project.analysis?.rooms.find((r) => r.name === room.roomName);
 
   async function handleRegenerate() {
@@ -637,22 +636,16 @@ function RoomSection({
   }
 
   async function handleCropSave(box: { x: number; y: number; width: number; height: number }) {
-    setCropSaving(true);
-    try {
-      const res = await fetch("/api/crop-snippet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, roomName: room.roomName, boundingBox: box }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Crop failed");
-      // Update the parent's state so the new snippet renders immediately
-      onSnippetUpdate(room.roomName, data.snippetUrl);
-    } catch (err) {
-      console.error("Manual crop failed:", err);
-    } finally {
-      setCropSaving(false);
-    }
+    const res = await fetch("/api/crop-snippet", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, roomName: room.roomName, boundingBox: box }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error ?? "Crop failed");
+    // Cache-bust: the filename is the same, so browsers serve the old image without this
+    const cacheBusted = data.snippetUrl + (data.snippetUrl.includes("?") ? "&" : "?") + "v=" + Date.now();
+    onSnippetUpdate(room.roomName, cacheBusted);
   }
 
   return (
@@ -691,7 +684,6 @@ function RoomSection({
             roomName={room.roomName}
             roomSize={roomDetail?.sizeEstimateSqm?.toString()}
             onSave={handleCropSave}
-            saving={cropSaving}
           />
           {roomDetail?.specialFeatures && roomDetail.specialFeatures.length > 0 && (
             <div className="mt-2 space-y-1">

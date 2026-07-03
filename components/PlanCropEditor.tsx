@@ -21,20 +21,19 @@ interface Props {
   initialBox?: Box;
   roomName: string;
   roomSize?: string;
-  onSave: (box: Box) => void;
-  saving?: boolean;
+  onSave: (box: Box) => Promise<void>;
 }
 
 export function PlanCropEditor({
-  planImageUrl, snippetUrl, initialBox, roomName, roomSize, onSave, saving,
+  planImageUrl, snippetUrl, initialBox, roomName, roomSize, onSave,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [localSaving, setLocalSaving] = useState(false);
   const [imgNat, setImgNat] = useState<{ w: number; h: number } | null>(null);
   const [cW, setCW] = useState(200);
   const [cH, setCH] = useState(200);
-  const waitingForSave = useRef(false);
 
   // State: zoom (1 = full width visible, 2 = half visible, etc.)
   // panX/panY: normalised center of visible region (0-1 in image coords)
@@ -75,14 +74,6 @@ export function PlanCropEditor({
       setZoom(z); setPanX(px); setPanY(py);
     }
   }, [editing]);
-
-  // Exit edit mode when save completes (snippetUrl changes)
-  useEffect(() => {
-    if (waitingForSave.current && !saving) {
-      waitingForSave.current = false;
-      setEditing(false);
-    }
-  }, [saving, snippetUrl]);
 
   // ── Derived: background-image rendering (pixel-based, no distortion) ──
   const getRendering = useCallback(() => {
@@ -177,9 +168,16 @@ export function PlanCropEditor({
   }, [editing, zoom, panX, panY, imgNat, cW, cH, clampPan]);
 
   // ── Actions ──
-  function handleSave() {
-    waitingForSave.current = true;
-    onSave(toBox());
+  async function handleSave() {
+    setLocalSaving(true);
+    try {
+      await onSave(toBox());
+      setEditing(false);
+    } catch (err) {
+      console.error("Crop save failed:", err);
+    } finally {
+      setLocalSaving(false);
+    }
   }
   function handleReset() {
     const z = initialBox ? 1 / initialBox.width : 1;
@@ -257,15 +255,15 @@ export function PlanCropEditor({
       </div>
 
       <div className="flex gap-1.5 mt-2">
-        <button type="button" onClick={handleSave} disabled={saving}
+        <button type="button" onClick={handleSave} disabled={localSaving}
           className="flex-1 font-mono text-[9px] uppercase tracking-widest bg-stone-900 text-white px-3 py-2 rounded-sm hover:bg-stone-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-1.5">
-          {saving ? <><span className="spinner w-2.5 h-2.5" style={{ borderWidth: 1 }} /> Saving…</> : "Save crop"}
+          {localSaving ? <><span className="spinner w-2.5 h-2.5" style={{ borderWidth: 1 }} /> Saving…</> : "Save crop"}
         </button>
-        <button type="button" onClick={handleReset} disabled={saving}
+        <button type="button" onClick={handleReset} disabled={localSaving}
           className="font-mono text-[9px] uppercase tracking-widest text-stone-400 px-3 py-2 border border-stone-200 rounded-sm hover:bg-stone-50 transition-colors">
           Reset
         </button>
-        <button type="button" onClick={() => { handleReset(); setEditing(false); }} disabled={saving}
+        <button type="button" onClick={() => { handleReset(); setEditing(false); }} disabled={localSaving}
           className="font-mono text-[9px] uppercase tracking-widest text-stone-400 px-3 py-2 hover:text-stone-600 transition-colors">
           Cancel
         </button>
