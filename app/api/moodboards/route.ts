@@ -103,11 +103,9 @@ export async function POST(req: NextRequest) {
     console.log(`[moodboards] Generating ${targetNames.length} room moodboards…`);
 
     const existing = project.roomMoodboards ?? [];
-    const generated: RoomMoodboard[] = [];
 
-    for (const [roomIdx, roomName] of targetNames.entries()) {
-      // Fuzzy match room name — Groq/Gemini may return slightly different names
-      // (e.g. "Bed Room" vs "Bedroom 2") so we try exact match first, then partial.
+    // Build all room tasks upfront
+    const roomTasks = targetNames.map((roomName, roomIdx) => {
       const roomDetail =
         detectedRooms.find((r) => r.name === roomName) ??
         detectedRooms.find((r) =>
@@ -119,30 +117,42 @@ export async function POST(req: NextRequest) {
         ) ??
         { name: roomName };
       const contextPrompt = contextPrompts?.[roomName]?.trim() || undefined;
+      return { roomName, roomDetail, contextPrompt, roomIdx };
+    });
 
-      // Pass roomIdx so each room fetches from a different Unsplash page offset,
-      // preventing similar rooms (Bedroom 2 vs Bedroom 3) from sharing photos.
-      const images = await generateRoomMoodboard(roomDetail as RoomDetail, styleProfile, contextPrompt, roomIdx, project.plotInfo);
+    // Process rooms in parallel batches of 4 to stay within Vercel's 60s timeout.
+    // Sequential processing of 12 rooms × ~2s each = 24s + Pollinations retries = timeout.
+    // Parallel batches of 4 × 3 rounds × ~2s = ~6s total Unsplash time.
+    const BATCH_SIZE = 4;
+    const generated: RoomMoodboard[] = [];
 
-      // Crop plan snippet for this room -- only if real coordinates exist.
-      const bbox = (roomDetail as RoomDetail).boundingBox;
-      console.log(`[moodboards] ${roomName} boundingBox:`, bbox ? JSON.stringify(bbox) : "none (re-analyse plan to get room coordinates)");
-      const planSnippetUrl = await cropRoomFromPlan(
-        project.planImagePath,
-        roomName,
-        projectId,
-        bbox
+    for (let i = 0; i < roomTasks.length; i += BATCH_SIZE) {
+      const batch = roomTasks.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async ({ roomName, roomDetail, contextPrompt, roomIdx }) => {
+          const images = await generateRoomMoodboard(roomDetail as RoomDetail, styleProfile, contextPrompt, roomIdx, project.plotInfo);
+
+          const bbox = (roomDetail as RoomDetail).boundingBox;
+          console.log(`[moodboards] ${roomName} boundingBox:`, bbox ? JSON.stringify(bbox) : "none");
+          const planSnippetUrl = await cropRoomFromPlan(
+            project.planImagePath,
+            roomName,
+            projectId,
+            bbox
+          );
+
+          const sourceSummary = images.map((im) => im.source).join(",");
+          console.log(`[moodboards] ✓ ${roomName}: ${images.length} images (${sourceSummary}), snippet: ${planSnippetUrl ? "✓" : "—"}`);
+
+          return {
+            roomName,
+            planSnippetUrl: planSnippetUrl ?? undefined,
+            images,
+            contextPrompt,
+          } as RoomMoodboard;
+        })
       );
-
-      generated.push({
-        roomName,
-        planSnippetUrl: planSnippetUrl ?? undefined,
-        images,
-        contextPrompt,
-      });
-
-      const sourceSummary = images.map((i) => i.source).join(",");
-      console.log(`[moodboards] ✓ ${roomName}: ${images.length} images (${sourceSummary}), snippet: ${planSnippetUrl ? "✓" : "—"}`);
+      generated.push(...results);
     }
 
     // Merge: keep existing rooms not being regenerated

@@ -558,10 +558,25 @@ export async function generateRoomMoodboard(
     try {
       return await generateRoomMoodboardFromUnsplash(room, style, contextPrompt, roomIndex, plotInfo);
     } catch (err) {
-      console.warn(`[ai] Unsplash failed for ${room.name}, falling back to AI generation:`, err);
+      console.warn(`[ai] Unsplash failed for ${room.name}:`, err);
     }
   }
-  return generateRoomMoodboardReal(room, style, plotInfo);
+  // AI generation only if Pollinations key is configured (it now requires auth)
+  if (process.env.POLLINATIONS_API_KEY) {
+    try {
+      return await generateRoomMoodboardReal(room, style, plotInfo);
+    } catch (err) {
+      console.warn(`[ai] AI generation failed for ${room.name}:`, err);
+    }
+  }
+  // Final fallback — placeholder stub images
+  console.warn(`[ai] No image source available for ${room.name}, using stubs`);
+  const stub = await moodboardStub(room, style);
+  return ROOM_IMAGE_CAPTIONS.map((caption) => ({
+    url: stub,
+    caption,
+    source: "ai" as const,
+  }));
 }
 
 const ROOM_IMAGE_CAPTIONS = ["Wide view", "Detail", "Atmosphere", "Close-up"];
@@ -580,10 +595,12 @@ async function generateRoomMoodboardFromUnsplash(
   const baseQuery = buildUnsplashQuery(
     room.name, style.overallStyle, style.palette, contextPrompt, room, 0, plotInfo
   );
+  // Fallback query without regional prefix (for when "Indian bathroom" returns 0 results)
+  const fallbackQuery = buildUnsplashQuery(
+    room.name, style.overallStyle, style.palette, contextPrompt, room, 0
+  );
 
-  // Cap page offset at 1 — Unsplash runs out of results at page 3+
-  // for specific interior queries. Pages 0 and 1 reliably return results.
-  const startPage = roomIndex % 2; // alternate between page 0 and page 1 only
+  const startPage = roomIndex % 2;
 
   let pool: MoodImage[] = [];
 
@@ -591,26 +608,28 @@ async function generateRoomMoodboardFromUnsplash(
     const page1 = await searchUnsplashPhotos(baseQuery, 10, startPage);
     pool = [...page1];
 
-    // Second page from the other offset
-    const page2Start = 1 - startPage; // if startPage=0, use 1; if 1, use 0
-    if (pool.length < 8) { // only fetch page 2 if page 1 didn't give enough
+    const page2Start = 1 - startPage;
+    if (pool.length < 8) {
       try {
         const page2 = await searchUnsplashPhotos(baseQuery, 10, page2Start);
         pool = [...pool, ...page2.filter((p) => !pool.some((e) => e.url === p.url))];
-      } catch {
-        // page 2 optional
-      }
+      } catch { /* page 2 optional */ }
     }
   } catch (err) {
-    console.warn(`[ai] Unsplash fetch failed for ${room.name}:`, err);
-    // Try a simpler fallback query (just room type + style, no palette)
+    console.warn(`[ai] Unsplash failed for "${baseQuery}", retrying without region…`);
+    // Retry without regional prefix
     try {
-      const fallbackQuery = buildUnsplashQuery(room.name, style.overallStyle, "LightAiry", undefined, undefined, 0);
-      const fallback = await searchUnsplashPhotos(fallbackQuery, 10, 0);
-      pool = [...fallback];
-      console.log(`[ai] Fallback query succeeded for ${room.name}: ${fallback.length} results`);
+      const page1 = await searchUnsplashPhotos(fallbackQuery, 10, startPage);
+      pool = [...page1];
     } catch {
-      // pool stays empty, will fall through to AI generation per slot
+      // Last resort: simplest possible query
+      try {
+        const simpleQuery = buildUnsplashQuery(room.name, style.overallStyle, "LightAiry", undefined, undefined, 0);
+        const simple = await searchUnsplashPhotos(simpleQuery, 10, 0);
+        pool = [...simple];
+      } catch {
+        // pool stays empty, will fall through to AI generation per slot
+      }
     }
   }
 
@@ -750,51 +769,71 @@ export async function generateOverallMoodboard(
     : "";
 
   if (process.env.UNSPLASH_ACCESS_KEY) {
+    const baseQueries: Record<string, string> = {
+      "Living spaces":       `living room ${style.overallStyle} interior design`,
+      "Kitchen & dining":    `kitchen dining ${style.overallStyle} interior design`,
+      "Bedrooms":            `bedroom ${style.overallStyle} interior design`,
+      "Bathrooms & details": `bathroom ${style.overallStyle} interior design`,
+    };
+    // Try with regional prefix first, fall back to without if no results
+    const regionalQueries: Record<string, string> = {};
+    for (const [k, v] of Object.entries(baseQueries)) {
+      regionalQueries[k] = regional ? `${regional}${v}` : v;
+    }
+
     try {
-      const queries: Record<string, string> = {
-        "Living spaces":       `${regional}living room ${style.overallStyle} interior design`,
-        "Kitchen & dining":    `${regional}kitchen dining ${style.overallStyle} interior design`,
-        "Bedrooms":            `${regional}bedroom ${style.overallStyle} interior design`,
-        "Bathrooms & details": `${regional}bathroom ${style.overallStyle} interior design`,
-      };
       const images: MoodImage[] = [];
       for (const caption of captions) {
-        const results = await searchUnsplashPhotos(queries[caption], 1);
+        let results: MoodImage[] = [];
+        try {
+          results = await searchUnsplashPhotos(regionalQueries[caption], 1);
+        } catch {
+          // Regional query returned nothing — retry without prefix
+          if (regional) {
+            console.log(`[ai] No results for "${regionalQueries[caption]}", retrying without region…`);
+            try { results = await searchUnsplashPhotos(baseQueries[caption], 1); } catch { /* empty */ }
+          }
+        }
         if (results[0]) images.push({ ...results[0], caption, source: "unsplash" as const });
       }
       if (images.length === captions.length) {
         return { images, styleStatement };
       }
     } catch (err) {
-      console.warn("[ai] Unsplash failed for overall moodboard, falling back to AI:", err);
+      console.warn("[ai] Unsplash failed for overall moodboard:", err);
     }
   }
 
-  // AI generation fallback
-  const locationHint = plotInfo?.city
-    ? `, ${plotInfo.city}${plotInfo.state ? ` ${plotInfo.state}` : ""}${plotInfo.country ? ` ${plotInfo.country}` : ""} residential`
-    : "";
-  const promptsByCaption: Record<string, string> = {
-    "Living spaces":         `Professional interior design photograph, living room and lounge area, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
-    "Kitchen & dining":      `Professional interior design photograph, kitchen and dining area, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
-    "Bedrooms":              `Professional interior design photograph, bedroom interior, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
-    "Bathrooms & details":   `Professional interior design photograph, bathroom interior with fine details, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
-  };
+  // AI generation fallback — only if Pollinations API key is configured
+  if (process.env.POLLINATIONS_API_KEY) {
+    const locationHint = plotInfo?.city
+      ? `, ${plotInfo.city}${plotInfo.state ? ` ${plotInfo.state}` : ""}${plotInfo.country ? ` ${plotInfo.country}` : ""} residential`
+      : "";
+    const promptsByCaption: Record<string, string> = {
+      "Living spaces":         `Professional interior design photograph, living room and lounge area, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
+      "Kitchen & dining":      `Professional interior design photograph, kitchen and dining area, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
+      "Bedrooms":              `Professional interior design photograph, bedroom interior, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
+      "Bathrooms & details":   `Professional interior design photograph, bathroom interior with fine details, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
+    };
 
-  const images: MoodImage[] = [];
-  for (const caption of captions) {
-    try {
-      const url = await generateWithPollinations(promptsByCaption[caption], caption);
-      images.push({ url, caption, source: "ai" });
-    } catch (err) {
-      console.warn(`[ai] Overall moodboard image "${caption}" failed, using stub:`, err);
-      const stub = await overallMoodboardStub(rooms, style);
-      const fallback = stub.images.find((i) => i.caption === caption) ?? stub.images[0];
-      images.push(fallback);
+    const images: MoodImage[] = [];
+    for (const caption of captions) {
+      try {
+        const url = await generateWithPollinations(promptsByCaption[caption], caption);
+        images.push({ url, caption, source: "ai" });
+      } catch (err) {
+        console.warn(`[ai] Overall moodboard image "${caption}" failed, using stub:`, err);
+        const stub = await overallMoodboardStub(rooms, style);
+        const fallback = stub.images.find((i) => i.caption === caption) ?? stub.images[0];
+        images.push(fallback);
+      }
     }
+    return { images, styleStatement };
   }
 
-  return { images, styleStatement };
+  // Final fallback — placeholder stub images (no Unsplash, no Pollinations)
+  console.warn("[ai] No image source available for overall moodboard, using stubs");
+  return overallMoodboardStub(rooms, style);
 }
 
 // ── Pollinations.ai (FREE — key recommended, no credit card) ──────────────────
