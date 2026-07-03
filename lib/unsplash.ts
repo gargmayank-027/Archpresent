@@ -27,7 +27,52 @@
  * for exactly this purpose -- the UI must render them (see moodboards page).
  */
 
-import type { MoodImage, RoomDetail } from "@/types";
+import type { MoodImage, RoomDetail, PlotInfo } from "@/types";
+
+/**
+ * Regional style vocabulary — when a project has location context,
+ * these terms are blended into search queries so Unsplash returns
+ * regionally appropriate interiors rather than generic Western ones.
+ *
+ * The mapping is intentionally broad (country + optional region) rather
+ * than city-level, because Unsplash's search corpus isn't deep enough
+ * for "Ludhiana living room" to return results, but "Indian living room"
+ * works well.
+ */
+function getRegionalTerms(plotInfo?: PlotInfo): string {
+  if (!plotInfo) return "";
+
+  const country = (plotInfo.country ?? "").toLowerCase();
+  const state   = (plotInfo.state ?? "").toLowerCase();
+  const city    = (plotInfo.city ?? "").toLowerCase();
+
+  // India — by far the most common case for this app
+  if (country === "india" || country === "in" || !country) {
+    // Regional nuances within India
+    if (["rajasthan", "jaipur", "jodhpur", "udaipur"].some(t => state.includes(t) || city.includes(t))) {
+      return "Indian Rajasthani";
+    }
+    if (["kerala", "kochi", "trivandrum"].some(t => state.includes(t) || city.includes(t))) {
+      return "Indian Kerala";
+    }
+    if (["goa"].some(t => state.includes(t) || city.includes(t))) {
+      return "Indian tropical Goa";
+    }
+    if (["tamil nadu", "chennai", "coimbatore"].some(t => state.includes(t) || city.includes(t))) {
+      return "Indian South Indian";
+    }
+    // Default Indian — works for Punjab, Maharashtra, UP, Delhi, etc.
+    if (plotInfo.city || plotInfo.state) return "Indian";
+  }
+
+  // Other countries — just prefix the country name
+  if (country) {
+    const countryName = country.charAt(0).toUpperCase() + country.slice(1);
+    return countryName;
+  }
+
+  return "";
+}
 
 const UNSPLASH_API = "https://api.unsplash.com";
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -171,7 +216,8 @@ export function buildUnsplashQuery(
   palette: string,
   contextPrompt?: string,
   room?: RoomDetail,
-  imageIndex?: number  // 0-3 — used to vary the search angle per image
+  imageIndex?: number,  // 0-3 — used to vary the search angle per image
+  plotInfo?: PlotInfo    // location context for regional styling
 ): string {
   // Terms are intentionally explicit to prevent Unsplash from returning
   // off-topic photos (e.g. kitchen photos appearing in a living room pool).
@@ -251,6 +297,10 @@ export function buildUnsplashQuery(
   const base = roomTerms[roomName] ?? `${roomName.toLowerCase()} interior`;
   
   const parts: string[] = [base, style.toLowerCase()];
+
+  // Regional context — "Indian modern living room" instead of just "modern living room"
+  const regional = getRegionalTerms(plotInfo);
+  if (regional) parts.splice(1, 0, regional); // insert after room term, before style
 
   // Palette — use only if it meaningfully changes the aesthetic
   const pal = paletteTerms[palette] ?? "";

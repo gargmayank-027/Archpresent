@@ -35,6 +35,11 @@ export default function NewProjectPage() {
       .catch(() => {});
   }, []);
 
+  // ── Location / site context ────────────────────────────────────────────────
+  const [city, setCity]       = useState("");
+  const [state_, setState_]   = useState("");
+  const [country, setCountry] = useState("India");
+
   // ── Plot / site info ───────────────────────────────────────────────────────
   const [plotAreaSqm, setPlotAreaSqm]           = useState("");
   const [builtUpAreaSqm, setBuiltUpAreaSqm]     = useState("");
@@ -96,6 +101,9 @@ export default function NewProjectPage() {
       fd.append("plan",       file);
 
       // Site context — only append if filled in
+      if (city.trim())        fd.append("city",           city.trim());
+      if (state_.trim())      fd.append("state",          state_.trim());
+      if (country.trim())     fd.append("country",        country.trim());
       if (plotAreaSqm)      fd.append("plotAreaSqm",      plotAreaSqm);
       if (builtUpAreaSqm)   fd.append("builtUpAreaSqm",   builtUpAreaSqm);
       if (facing)           fd.append("facing",           facing);
@@ -165,7 +173,28 @@ export default function NewProjectPage() {
 
         {/* ── 2. Site context ────────────────────────────────────────────── */}
         <div className="card p-6 space-y-5 fade-up fade-up-3">
-          <SectionHeader n="02" label="Site Context" hint="Helps AI give more accurate analysis" />
+          <SectionHeader n="02" label="Site Context" hint="Location helps AI recommend regionally relevant interiors" />
+
+          {/* Location */}
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="field-label">City *</label>
+              <input className="field-input" type="text"
+                placeholder="e.g. Ludhiana"
+                value={city} onChange={(e) => setCity(e.target.value)} />
+            </div>
+            <div>
+              <label className="field-label">State</label>
+              <input className="field-input" type="text"
+                placeholder="e.g. Punjab"
+                value={state_} onChange={(e) => setState_(e.target.value)} />
+            </div>
+            <div>
+              <label className="field-label">Country</label>
+              <input className="field-input" type="text"
+                value={country} onChange={(e) => setCountry(e.target.value)} />
+            </div>
+          </div>
 
           {/* Areas */}
           <div className="grid grid-cols-2 gap-4">

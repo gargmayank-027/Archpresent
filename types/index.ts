@@ -7,6 +7,12 @@ export type PropertyType = "Apartment" | "Independent House" | "Villa" | "Pentho
 export type FloorLocation = "Ground" | "Lower" | "Mid" | "Top" | "Duplex";
 
 export interface PlotInfo {
+  // Location context — drives image search and style recommendations
+  city?: string;              // e.g. "Ludhiana", "Bengaluru", "Jaipur"
+  state?: string;             // e.g. "Punjab", "Karnataka", "Rajasthan"
+  country?: string;           // defaults to "India" if not specified
+  climateZone?: ClimateZone;  // hot-dry, warm-humid, composite, cold, temperate
+
   plotAreaSqm?: number;           // total plot / carpet area in sqm
   builtUpAreaSqm?: number;        // built-up / super built-up area in sqm
   facing?: PlotFacing;            // main entrance / plot facing direction
@@ -17,6 +23,8 @@ export interface PlotInfo {
   vaastuCompliance?: boolean;     // client wants Vaastu considered?
   additionalNotes?: string;       // free-text: corner plot, irregular shape, setbacks, etc.
 }
+
+export type ClimateZone = "hot-dry" | "warm-humid" | "composite" | "cold" | "temperate";
 
 export interface PlanPage {
   pageNumber: number;   // 1-indexed, matches the page's position in the source PDF

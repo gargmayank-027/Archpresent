@@ -551,18 +551,17 @@ export async function generateRoomMoodboard(
   room: RoomDetail,
   style: StyleProfile,
   contextPrompt?: string,
-  roomIndex = 0  // position of this room in the generation order — used to
-                  // offset Unsplash page so similar rooms (e.g. Bedroom 2 vs
-                  // Bedroom 3) don't pull from the same cached result page
+  roomIndex = 0,
+  plotInfo?: PlotInfo
 ): Promise<MoodImage[]> {
   if (process.env.UNSPLASH_ACCESS_KEY) {
     try {
-      return await generateRoomMoodboardFromUnsplash(room, style, contextPrompt, roomIndex);
+      return await generateRoomMoodboardFromUnsplash(room, style, contextPrompt, roomIndex, plotInfo);
     } catch (err) {
       console.warn(`[ai] Unsplash failed for ${room.name}, falling back to AI generation:`, err);
     }
   }
-  return generateRoomMoodboardReal(room, style);
+  return generateRoomMoodboardReal(room, style, plotInfo);
 }
 
 const ROOM_IMAGE_CAPTIONS = ["Wide view", "Detail", "Atmosphere", "Close-up"];
@@ -571,14 +570,15 @@ async function generateRoomMoodboardFromUnsplash(
   room: RoomDetail,
   style: StyleProfile,
   contextPrompt?: string,
-  roomIndex = 0
+  roomIndex = 0,
+  plotInfo?: PlotInfo
 ): Promise<MoodImage[]> {
   // Strategy: 1-2 API calls per room.
   // Each room uses a different starting page (roomIndex % 3) so similar
   // rooms (Bedroom 2 vs Bedroom 3) don't pull from the same cached result set.
 
   const baseQuery = buildUnsplashQuery(
-    room.name, style.overallStyle, style.palette, contextPrompt, room, 0
+    room.name, style.overallStyle, style.palette, contextPrompt, room, 0, plotInfo
   );
 
   // Cap page offset at 1 — Unsplash runs out of results at page 3+
@@ -654,13 +654,17 @@ async function generateRoomMoodboardFromUnsplash(
 // atmosphere, close-up). Used when Unsplash isn't configured or fails.
 async function generateRoomMoodboardReal(
   room: RoomDetail,
-  style: StyleProfile
+  style: StyleProfile,
+  plotInfo?: PlotInfo
 ): Promise<MoodImage[]> {
+  const locationHint = plotInfo?.city
+    ? `, ${plotInfo.city}${plotInfo.state ? ` ${plotInfo.state}` : ""}${plotInfo.country ? ` ${plotInfo.country}` : ""} residential interior`
+    : "";
   const promptVariants = [
-    buildMoodboardPrompt(room, style),
-    buildMoodboardPrompt(room, style) + " detail shot, close-up",
-    buildMoodboardPrompt(room, style) + " atmospheric, moody lighting",
-    buildMoodboardPrompt(room, style) + " textural close-up, materials",
+    buildMoodboardPrompt(room, style) + locationHint,
+    buildMoodboardPrompt(room, style) + locationHint + " detail shot, close-up",
+    buildMoodboardPrompt(room, style) + locationHint + " atmospheric, moody lighting",
+    buildMoodboardPrompt(room, style) + locationHint + " textural close-up, materials",
   ];
 
   const images: MoodImage[] = [];
@@ -701,7 +705,8 @@ export async function regenerateSingleRoomImage(
   mode: "photo" | "ai",
   contextPrompt: string | undefined,
   existingUrls: string[],
-  caption?: string
+  caption?: string,
+  plotInfo?: PlotInfo
 ): Promise<MoodImage> {
   if (mode === "photo") {
     if (!process.env.UNSPLASH_ACCESS_KEY) {
@@ -710,13 +715,16 @@ export async function regenerateSingleRoomImage(
         "Get a free key at unsplash.com/developers."
       );
     }
-    const query = buildUnsplashQuery(room.name, style.overallStyle, style.palette, contextPrompt);
+    const query = buildUnsplashQuery(room.name, style.overallStyle, style.palette, contextPrompt, room, 0, plotInfo);
     const replacement = await getReplacementPhoto(query, existingUrls);
     return { ...replacement, caption: caption ?? replacement.caption, source: "unsplash" as const };
   }
 
   // mode === "ai"
-  const prompt = buildMoodboardPrompt(room, style) +
+  const locationHint = plotInfo?.city
+    ? `, ${plotInfo.city}${plotInfo.state ? ` ${plotInfo.state}` : ""} residential interior`
+    : "";
+  const prompt = buildMoodboardPrompt(room, style) + locationHint +
     (caption === "Detail" ? " detail shot, close-up" :
      caption === "Atmosphere" ? " atmospheric, moody lighting" :
      caption === "Close-up" ? " textural close-up, materials" : "");
@@ -730,18 +738,24 @@ export async function regenerateSingleRoomImage(
  */
 export async function generateOverallMoodboard(
   rooms: RoomDetail[],
-  style: StyleProfile
+  style: StyleProfile,
+  plotInfo?: PlotInfo
 ): Promise<OverallMoodboard> {
   const captions = ["Living spaces", "Kitchen & dining", "Bedrooms", "Bathrooms & details"];
   const styleStatement = STYLE_STATEMENTS[style.overallStyle] ?? "A considered interior designed around your life.";
 
+  // Build regional prefix from location context
+  const regional = plotInfo?.city
+    ? (plotInfo.country?.toLowerCase() === "india" || !plotInfo.country ? "Indian " : `${plotInfo.country} `)
+    : "";
+
   if (process.env.UNSPLASH_ACCESS_KEY) {
     try {
       const queries: Record<string, string> = {
-        "Living spaces":       `living room ${style.overallStyle} interior design`,
-        "Kitchen & dining":    `kitchen dining ${style.overallStyle} interior design`,
-        "Bedrooms":            `bedroom ${style.overallStyle} interior design`,
-        "Bathrooms & details": `bathroom ${style.overallStyle} interior design`,
+        "Living spaces":       `${regional}living room ${style.overallStyle} interior design`,
+        "Kitchen & dining":    `${regional}kitchen dining ${style.overallStyle} interior design`,
+        "Bedrooms":            `${regional}bedroom ${style.overallStyle} interior design`,
+        "Bathrooms & details": `${regional}bathroom ${style.overallStyle} interior design`,
       };
       const images: MoodImage[] = [];
       for (const caption of captions) {
@@ -757,11 +771,14 @@ export async function generateOverallMoodboard(
   }
 
   // AI generation fallback
+  const locationHint = plotInfo?.city
+    ? `, ${plotInfo.city}${plotInfo.state ? ` ${plotInfo.state}` : ""}${plotInfo.country ? ` ${plotInfo.country}` : ""} residential`
+    : "";
   const promptsByCaption: Record<string, string> = {
-    "Living spaces":         `Professional interior design photograph, living room and lounge area, ${style.overallStyle} style, photorealistic, 4K, magazine quality, no people.`,
-    "Kitchen & dining":      `Professional interior design photograph, kitchen and dining area, ${style.overallStyle} style, photorealistic, 4K, magazine quality, no people.`,
-    "Bedrooms":              `Professional interior design photograph, bedroom interior, ${style.overallStyle} style, photorealistic, 4K, magazine quality, no people.`,
-    "Bathrooms & details":   `Professional interior design photograph, bathroom interior with fine details, ${style.overallStyle} style, photorealistic, 4K, magazine quality, no people.`,
+    "Living spaces":         `Professional interior design photograph, living room and lounge area, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
+    "Kitchen & dining":      `Professional interior design photograph, kitchen and dining area, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
+    "Bedrooms":              `Professional interior design photograph, bedroom interior, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
+    "Bathrooms & details":   `Professional interior design photograph, bathroom interior with fine details, ${style.overallStyle} style${locationHint}, photorealistic, 4K, magazine quality, no people.`,
   };
 
   const images: MoodImage[] = [];

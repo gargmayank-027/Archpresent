@@ -95,7 +95,8 @@ export async function POST(req: NextRequest) {
     console.log("[moodboards] Generating overall moodboard…");
     const overallMoodboard: OverallMoodboard = await generateOverallMoodboard(
       detectedRooms,
-      styleProfile
+      styleProfile,
+      project.plotInfo
     );
 
     // -- 2. Per-room moodboards -------------------------------------------------
@@ -121,7 +122,7 @@ export async function POST(req: NextRequest) {
 
       // Pass roomIdx so each room fetches from a different Unsplash page offset,
       // preventing similar rooms (Bedroom 2 vs Bedroom 3) from sharing photos.
-      const images = await generateRoomMoodboard(roomDetail as RoomDetail, styleProfile, contextPrompt, roomIdx);
+      const images = await generateRoomMoodboard(roomDetail as RoomDetail, styleProfile, contextPrompt, roomIdx, project.plotInfo);
 
       // Crop plan snippet for this room -- only if real coordinates exist.
       const bbox = (roomDetail as RoomDetail).boundingBox;
@@ -221,7 +222,8 @@ export async function PATCH(req: NextRequest) {
       mode,
       roomMoodboard.contextPrompt,
       existingUrls,
-      targetCaption
+      targetCaption,
+      project.plotInfo
     );
 
     const roomMoodboards = (project.roomMoodboards ?? []).map((rm) => {

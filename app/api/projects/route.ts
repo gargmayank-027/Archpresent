@@ -63,6 +63,9 @@ export async function POST(req: NextRequest) {
     // ── Parse plot / site context fields ────────────────────────────────────
     const plotInfo: PlotInfo = {};
 
+    const cityRaw          = formData.get("city");
+    const stateRaw         = formData.get("state");
+    const countryRaw       = formData.get("country");
     const plotAreaRaw      = formData.get("plotAreaSqm");
     const builtUpAreaRaw   = formData.get("builtUpAreaSqm");
     const facingRaw        = formData.get("facing");
@@ -73,6 +76,9 @@ export async function POST(req: NextRequest) {
     const vaastuRaw        = formData.get("vaastuCompliance");
     const notesRaw         = formData.get("additionalNotes");
 
+    if (cityRaw && String(cityRaw).trim())       plotInfo.city    = String(cityRaw).trim();
+    if (stateRaw && String(stateRaw).trim())     plotInfo.state   = String(stateRaw).trim();
+    if (countryRaw && String(countryRaw).trim())  plotInfo.country = String(countryRaw).trim();
     if (plotAreaRaw)     plotInfo.plotAreaSqm        = Number(plotAreaRaw);
     if (builtUpAreaRaw)  plotInfo.builtUpAreaSqm     = Number(builtUpAreaRaw);
     if (facingRaw)       plotInfo.facing             = facingRaw as PlotFacing;
