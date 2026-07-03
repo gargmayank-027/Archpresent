@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
+import { PlanCropEditor } from "@/components/PlanCropEditor";
 import type {
   Project, StyleProfile, OverallMoodboard, RoomMoodboard, MoodImage,
   OverallStyle, Palette, BudgetVibe,
@@ -593,6 +594,11 @@ export default function MoodboardsPage() {
                   project={project}
                   onRegenerate={() => regenerateRoom(rm.roomName)}
                   onRegenerateImage={(idx, mode) => regenerateImage(rm.roomName, idx, mode)}
+                  onSnippetUpdate={(roomName, snippetUrl) => {
+                    setRoomMoodboards((prev) =>
+                      prev.map((m) => m.roomName === roomName ? { ...m, planSnippetUrl: snippetUrl } : m)
+                    );
+                  }}
                 />
               ))}
             </section>
@@ -612,20 +618,41 @@ export default function MoodboardsPage() {
 // ─── Room Section ─────────────────────────────────────────────────────────────
 
 function RoomSection({
-  room, project, onRegenerate, onRegenerateImage,
+  room, project, onRegenerate, onRegenerateImage, onSnippetUpdate,
 }: {
   room: RoomMoodboard;
   project: Project;
   onRegenerate: () => void;
   onRegenerateImage: (imageIndex: number, mode: "photo" | "ai") => void;
+  onSnippetUpdate: (roomName: string, snippetUrl: string) => void;
 }) {
   const [regenerating, setRegenerating] = useState(false);
+  const [cropSaving, setCropSaving] = useState(false);
   const roomDetail = project.analysis?.rooms.find((r) => r.name === room.roomName);
 
   async function handleRegenerate() {
     setRegenerating(true);
     await onRegenerate();
     setRegenerating(false);
+  }
+
+  async function handleCropSave(box: { x: number; y: number; width: number; height: number }) {
+    setCropSaving(true);
+    try {
+      const res = await fetch("/api/crop-snippet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, roomName: room.roomName, boundingBox: box }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Crop failed");
+      // Update the parent's state so the new snippet renders immediately
+      onSnippetUpdate(room.roomName, data.snippetUrl);
+    } catch (err) {
+      console.error("Manual crop failed:", err);
+    } finally {
+      setCropSaving(false);
+    }
   }
 
   return (
@@ -655,28 +682,16 @@ function RoomSection({
 
       <div className="grid grid-cols-4 gap-2 items-start">
 
-        {/* Plan snippet */}
+        {/* Plan snippet — interactive crop editor */}
         <div className="col-span-1">
-          <p className="font-mono text-[9px] text-stone-400 uppercase tracking-widest mb-1.5">Plan</p>
-          {room.planSnippetUrl ? (
-            <div className="border border-stone-200 rounded-sm overflow-hidden bg-white">
-              <img src={room.planSnippetUrl} alt={`${room.roomName} plan`}
-                className="w-full object-contain" style={{ imageRendering: "crisp-edges", maxHeight: "160px" }} />
-              <div className="px-2 py-1.5 border-t border-stone-100">
-                <p className="font-mono text-[9px] text-stone-400 truncate">{room.roomName}</p>
-                {roomDetail?.sizeEstimateSqm && <p className="font-mono text-[9px] text-stone-300">{roomDetail.sizeEstimateSqm} m²</p>}
-              </div>
-            </div>
-          ) : (
-            <div className="border border-stone-200 rounded-sm overflow-hidden bg-white">
-              <img src={project.planImageUrl} alt="Full floor plan"
-                className="w-full object-contain" style={{ imageRendering: "crisp-edges", maxHeight: "160px" }} />
-              <div className="px-2 py-1.5 border-t border-stone-100">
-                <p className="font-mono text-[9px] text-stone-400">Full plan</p>
-                <p className="font-mono text-[9px] text-stone-300">{room.roomName} location not isolated</p>
-              </div>
-            </div>
-          )}
+          <PlanCropEditor
+            planImageUrl={project.planImageUrl}
+            initialBox={roomDetail?.boundingBox}
+            roomName={room.roomName}
+            roomSize={roomDetail?.sizeEstimateSqm?.toString()}
+            onSave={handleCropSave}
+            saving={cropSaving}
+          />
           {roomDetail?.specialFeatures && roomDetail.specialFeatures.length > 0 && (
             <div className="mt-2 space-y-1">
               {roomDetail.specialFeatures.slice(0, 3).map((f) => (
