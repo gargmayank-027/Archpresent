@@ -25,8 +25,30 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen">
 
+      {/* ── Landing nav ──────────────────────────────────────────────────── */}
+      <header className="fixed top-0 left-0 right-0 z-50 border-b border-stone-200/50 bg-stone-50/85 backdrop-blur-md backdrop-saturate-150">
+        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+          <a href="/" className="flex items-center gap-2">
+            <span className="font-mono text-[10px] tracking-[0.2em] text-stone-400 uppercase">Arch</span>
+            <span className="w-px h-3 bg-stone-300" />
+            <span className="font-display text-lg font-light text-stone-700"
+              style={{ fontFamily: "'Cormorant Garamond', serif" }}>Present</span>
+          </a>
+          <div className="flex items-center gap-2">
+            <Link href="/login"
+              className="px-4 py-1.5 font-mono text-[10px] tracking-widest uppercase text-stone-500 hover:text-stone-800 transition-colors">
+              Log in
+            </Link>
+            <Link href="/signup"
+              className="px-5 py-1.5 font-mono text-[10px] tracking-widest uppercase bg-stone-900 text-white rounded-sm hover:bg-stone-700 transition-colors">
+              Sign up
+            </Link>
+          </div>
+        </div>
+      </header>
+
       {/* ── Hero ──────────────────────────────────────────────────────────── */}
-      <section className="max-w-6xl mx-auto px-6 pt-20 pb-24">
+      <section className="max-w-6xl mx-auto px-6 pt-24 pb-24">
         <div className="grid lg:grid-cols-2 gap-16 items-center">
           <div className="fade-up fade-up-1">
             <p className="font-mono text-[10px] tracking-[0.25em] text-amber-700 uppercase mb-6">
@@ -43,11 +65,11 @@ export default function LandingPage() {
             </p>
             <div className="flex flex-wrap gap-3">
               <Link href="/signup" className="btn-primary text-sm px-8 py-3">
-                Get started free
+                Sign up free
               </Link>
-              <a href="#how-it-works" className="btn-secondary text-sm px-8 py-3">
-                See how it works
-              </a>
+              <Link href="/login" className="btn-secondary text-sm px-8 py-3">
+                Log in
+              </Link>
             </div>
           </div>
 
@@ -214,9 +236,14 @@ export default function LandingPage() {
         <p className="text-stone-500 max-w-md mx-auto mb-10">
           Set up your firm profile once. Upload a plan. Send the deck. That's it.
         </p>
-        <Link href="/signup" className="btn-primary text-sm px-10 py-3.5">
-          Get started free
-        </Link>
+        <div className="flex justify-center gap-3">
+          <Link href="/signup" className="btn-primary text-sm px-8 py-3">
+            Sign up free
+          </Link>
+          <Link href="/login" className="btn-secondary text-sm px-8 py-3">
+            Log in
+          </Link>
+        </div>
       </section>
 
       {/* ── Footer ────────────────────────────────────────────────────────── */}

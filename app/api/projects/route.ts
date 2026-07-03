@@ -13,9 +13,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { projectStore, saveUploadedFile } from "@/lib/store";
 import { splitPdfPages } from "@/lib/pdfRaster";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 import type { Project, PlotInfo, PlotFacing, PropertyType, FloorLocation, PlanPage } from "@/types";
 
 export const runtime = "nodejs";
+
+/** Get the current user's ID from the session, or null if not authenticated */
+async function getUserId(): Promise<string | null> {
+  try {
+    const session = await getServerSession(authOptions);
+    return (session?.user as any)?.id ?? session?.user?.email ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -133,8 +145,10 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Create project ──────────────────────────────────────────────────────
+    const userId = await getUserId();
     const project: Project = {
       id,
+      userId: userId ?? undefined,
       name,
       clientName,
       firmName,
@@ -156,7 +170,16 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   try {
-    const projects = await projectStore.list();
+    const userId = await getUserId();
+    const allProjects = await projectStore.list();
+
+    // Only return projects owned by this user.
+    // Projects without a userId (created before auth was added) are hidden
+    // from all authenticated users — they're legacy/orphaned data.
+    const projects = userId
+      ? allProjects.filter((p) => p.userId === userId)
+      : allProjects;
+
     return NextResponse.json({ projects }, {
       headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
     });

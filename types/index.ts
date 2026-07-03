@@ -27,6 +27,7 @@ export interface PlanPage {
 
 export interface Project {
   id: string;
+  userId?: string;  // owner — projects are scoped per user
   name: string;
   clientName: string;
   firmName: string;
