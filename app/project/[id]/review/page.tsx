@@ -23,12 +23,20 @@ export default function ReviewPage() {
   const [selectingFloor, setSelectingFloor] = useState(false);
   const [floorError,     setFloorError]     = useState<string | null>(null);
 
-  const STEPS = [
-    { num: "1", label: "Upload",     status: "complete" as const },
-    { num: "2", label: "Review",     status: "active"   as const },
-    { num: "3", label: "Moodboards", status: "pending"  as const },
-    { num: "4", label: "Export",     status: "pending"  as const },
-  ];
+  const isConcept = project?.presentationType === "concept";
+
+  const STEPS = isConcept
+    ? [
+        { num: "1", label: "Upload",  status: "complete" as const },
+        { num: "2", label: "Review",  status: "active"   as const },
+        { num: "3", label: "Export",  status: "pending"  as const },
+      ]
+    : [
+        { num: "1", label: "Upload",     status: "complete" as const },
+        { num: "2", label: "Review",     status: "active"   as const },
+        { num: "3", label: "Moodboards", status: "pending"  as const },
+        { num: "4", label: "Export",     status: "pending"  as const },
+      ];
 
   const [autoRasterizing, setAutoRasterizing] = useState(false);
 
@@ -246,7 +254,7 @@ export default function ReviewPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId: id, strengths, analysis }),
       });
-      router.push(`/project/${id}/moodboards`);
+      router.push(isConcept ? `/project/${id}/export` : `/project/${id}/moodboards`);
     } catch {
       setError("Save failed — please try again.");
     } finally {
@@ -463,7 +471,7 @@ export default function ReviewPage() {
                 {saving ? (
                   <><span className="spinner" /><span>Saving…</span></>
                 ) : (
-                  <><span>Save & Continue to Moodboards</span><span>→</span></>
+                  <><span>{isConcept ? "Save & Continue to Export" : "Save & Continue to Moodboards"}</span><span>→</span></>
                 )}
               </button>
             </>

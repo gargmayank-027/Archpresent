@@ -30,12 +30,20 @@ export default function ExportPage() {
   const [shareEnabled, setShareEnabled] = useState(false);
   const [shareViews,   setShareViews]   = useState(0);
 
-  const STEPS = [
-    { num: "1", label: "Upload",     status: "complete" as const },
-    { num: "2", label: "Review",     status: "complete" as const },
-    { num: "3", label: "Moodboards", status: "complete" as const },
-    { num: "4", label: "Export",     status: "active"   as const },
-  ];
+  const isConcept = project?.presentationType === "concept";
+
+  const STEPS = isConcept
+    ? [
+        { num: "1", label: "Upload",  status: "complete" as const },
+        { num: "2", label: "Review",  status: "complete" as const },
+        { num: "3", label: "Export",  status: "active"   as const },
+      ]
+    : [
+        { num: "1", label: "Upload",     status: "complete" as const },
+        { num: "2", label: "Review",     status: "complete" as const },
+        { num: "3", label: "Moodboards", status: "complete" as const },
+        { num: "4", label: "Export",     status: "active"   as const },
+      ];
 
   function loadProject() {
     // cache: "no-store" forces a fresh fetch every time — prevents the
@@ -244,9 +252,16 @@ export default function ExportPage() {
               className="btn-ghost text-xs" title="Re-run plan analysis to update room data and enable plan cropping">
               {reanalysing ? <><span className="spinner w-3 h-3" style={{borderWidth:1}} /><span>Re-analysing…</span></> : "⟳ Re-analyse"}
             </button>
-            <a href={`/project/${id}/moodboards`} className="btn-secondary">
-              ← Edit Moodboards
-            </a>
+            {!isConcept && (
+              <a href={`/project/${id}/moodboards`} className="btn-secondary">
+                ← Edit Moodboards
+              </a>
+            )}
+            {isConcept && (
+              <a href={`/project/${id}/review`} className="btn-secondary">
+                ← Edit Review
+              </a>
+            )}
             <button onClick={handleExport} disabled={exporting || !isReady} className="btn-primary">
               {exporting ? (
                 <><span className="spinner" /><span>Building PDF…</span></>

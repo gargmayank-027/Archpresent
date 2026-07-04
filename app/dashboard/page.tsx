@@ -207,7 +207,11 @@ function ProjectCard({
 
   const nextStep = (status: string) => {
     if (status === "created")  return `/project/${project.id}/review`;
-    if (status === "analyzed") return `/project/${project.id}/moodboards`;
+    if (status === "analyzed") {
+      return project.presentationType === "concept"
+        ? `/project/${project.id}/export`
+        : `/project/${project.id}/moodboards`;
+    }
     return `/project/${project.id}/export`;
   };
 

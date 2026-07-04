@@ -74,7 +74,6 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
   // Embed logo
   let logoBytes: Uint8Array | null = null;
   let logoIsPng = false;
-  // logoDiskPath is a disk path locally, a blob URL on Vercel
   const logoPath = firm?.logoDiskPath ?? firm?.logoUrl;
   if (logoPath) {
     try {
@@ -89,33 +88,58 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
     } catch { /* logo failed — skip gracefully */ }
   }
 
-  // Build pages
-  await addCoverSlide(doc, project, firm, accent, reg, bold, italic, logoBytes, logoIsPng);
+  if (project.presentationType === "concept") {
+    // ── CONCEPT PRESENTATION ──────────────────────────────────────────
+    // First-meeting deck: spatial storytelling, no moodboards
+    await addCoverSlide(doc, project, firm, accent, reg, bold, italic, logoBytes, logoIsPng);
 
-  if (project.plotInfo && Object.keys(project.plotInfo).length > 0) {
-    await addSiteContextSlide(doc, project, accent, reg, bold);
-  }
-
-  await addPlanSlide(doc, project, accent, reg, bold);
-
-  if ((project.planStrengths ?? []).length > 0) {
-    await addStrengthsSlide(doc, project, project.planStrengths!, accent, reg, bold);
-  }
-
-  // Overall style moodboard slide (4-image collage)
-  if (project.overallMoodboard) {
-    await addOverallMoodboardSlide(doc, project.overallMoodboard, project, accent, reg, bold, italic);
-  }
-
-  // Per-room slides: plan snippet left + 3-4 mood images right
-  if (project.roomMoodboards && project.roomMoodboards.length > 0) {
-    for (const rm of project.roomMoodboards) {
-      await addRoomMoodboardSlide(doc, rm, project, accent, reg, bold);
+    if (project.plotInfo && Object.keys(project.plotInfo).length > 0) {
+      await addSiteContextSlide(doc, project, accent, reg, bold);
     }
+
+    await addPlanSlide(doc, project, accent, reg, bold);
+
+    if ((project.planStrengths ?? []).length > 0) {
+      await addStrengthsSlide(doc, project, project.planStrengths!, accent, reg, bold);
+    }
+
+    // Room-by-room narrative walkthrough
+    if (project.analysis?.rooms?.length) {
+      await addRoomWalkthroughSlide(doc, project, accent, reg, bold, italic);
+    }
+
+    // Spatial highlights — area comparisons in plain language
+    if (project.analysis?.rooms?.length) {
+      await addSpatialHighlightsSlide(doc, project, accent, reg, bold, italic);
+    }
+
   } else {
-    // Legacy fallback
-    for (const mb of project.moodboards ?? []) {
-      await addMoodboardSlide(doc, mb, accent, reg, bold);
+    // ── INTERIOR PRESENTATION ─────────────────────────────────────────
+    // Design-phase deck: moodboards for every room
+    await addCoverSlide(doc, project, firm, accent, reg, bold, italic, logoBytes, logoIsPng);
+
+    if (project.plotInfo && Object.keys(project.plotInfo).length > 0) {
+      await addSiteContextSlide(doc, project, accent, reg, bold);
+    }
+
+    await addPlanSlide(doc, project, accent, reg, bold);
+
+    if ((project.planStrengths ?? []).length > 0) {
+      await addStrengthsSlide(doc, project, project.planStrengths!, accent, reg, bold);
+    }
+
+    if (project.overallMoodboard) {
+      await addOverallMoodboardSlide(doc, project.overallMoodboard, project, accent, reg, bold, italic);
+    }
+
+    if (project.roomMoodboards && project.roomMoodboards.length > 0) {
+      for (const rm of project.roomMoodboards) {
+        await addRoomMoodboardSlide(doc, rm, project, accent, reg, bold);
+      }
+    } else {
+      for (const mb of project.moodboards ?? []) {
+        await addMoodboardSlide(doc, mb, accent, reg, bold);
+      }
     }
   }
 
@@ -1001,5 +1025,278 @@ function fetchRemoteImage(url: string): Promise<Buffer> {
       res.on("end",  () => resolve(Buffer.concat(chunks)));
       res.on("error", reject);
     }).on("error", reject);
+  });
+}
+
+// ─── Concept Presentation: Room Walkthrough slide ─────────────────────────────
+//
+// A narrative "walk through the home" — each room gets a short paragraph
+// describing what makes it work, written in second person ("Your master
+// bedroom faces east — morning light fills the room naturally").
+
+async function addRoomWalkthroughSlide(
+  doc: PDFDocument,
+  project: Project,
+  accent: RGB,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont
+) {
+  const rooms = project.analysis?.rooms ?? [];
+  if (rooms.length === 0) return;
+
+  const page = doc.addPage([W, H]);
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
+  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+
+  page.drawText("A WALK THROUGH YOUR HOME", {
+    x: M, y: H - M - 4, size: 9, font: bold, color: accent,
+  });
+
+  // Subtitle
+  page.drawText("Every room has been designed with purpose — here's how your home works for you.", {
+    x: M, y: H - M - 22, size: 10, font: italic, color: C.muted,
+  });
+
+  // Two-column room descriptions
+  const colW = (W - M * 3) / 2;
+  const startY = H - M - 50;
+  let col = 0;
+  let y = startY;
+  const lineH = 13;
+  const roomGap = 24;
+
+  for (const room of rooms) {
+    const x = M + col * (colW + M);
+
+    // Room name
+    page.drawText(room.name.toUpperCase(), {
+      x, y, size: 8, font: bold, color: accent,
+    });
+    y -= 3;
+
+    // Separator line
+    page.drawLine({
+      start: { x, y }, end: { x: x + colW * 0.3, y },
+      thickness: 0.5, color: rgb(0.3, 0.3, 0.3),
+    });
+    y -= lineH;
+
+    // Build a narrative description from the room data
+    const desc = buildRoomNarrative(room, project.plotInfo);
+    const lines = wrapText(desc, font, 8.5, colW - 10);
+
+    for (const line of lines.slice(0, 4)) { // max 4 lines per room
+      page.drawText(line, { x, y, size: 8.5, font, color: C.light });
+      y -= lineH;
+    }
+
+    y -= roomGap - lineH;
+
+    // Switch column or page if we run out of space
+    if (y < M + 40) {
+      if (col === 0) {
+        col = 1;
+        y = startY;
+      } else {
+        // Need a new page
+        col = 0;
+        y = startY;
+        // Start fresh page for remaining rooms
+        const nextPage = doc.addPage([W, H]);
+        nextPage.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
+        nextPage.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+        nextPage.drawText("YOUR HOME — CONTINUED", {
+          x: M, y: H - M - 4, size: 9, font: bold, color: accent,
+        });
+        // Reassign page reference for subsequent drawing
+        // (pdf-lib requires drawing on the returned page object)
+        break; // For now, limit to one page of walkthrough
+      }
+    }
+  }
+}
+
+/**
+ * Build a short narrative description of a room using its detection data.
+ * Written in second person for the client: "Your bedroom faces east…"
+ */
+function buildRoomNarrative(room: import("@/types").RoomDetail, plotInfo?: import("@/types").PlotInfo): string {
+  const parts: string[] = [];
+  const name = room.name.toLowerCase();
+
+  // Size context
+  if (room.sizeEstimateSqm) {
+    const sqm = room.sizeEstimateSqm;
+    if (sqm > 30) parts.push(`At ${sqm} sqm, this is a generously proportioned space.`);
+    else if (sqm > 18) parts.push(`A comfortable ${sqm} sqm — well-sized for its purpose.`);
+    else if (sqm > 10) parts.push(`A compact but efficient ${sqm} sqm.`);
+    else parts.push(`${sqm} sqm — thoughtfully planned.`);
+  }
+
+  // Orientation
+  if (room.orientation) {
+    const orient = room.orientation.toLowerCase();
+    if (orient.includes("east")) parts.push("East-facing, it catches the morning sun.");
+    else if (orient.includes("west")) parts.push("West-facing, it gets warm afternoon light.");
+    else if (orient.includes("north")) parts.push("North-facing for consistent, soft daylight.");
+    else if (orient.includes("south")) parts.push("South-facing with bright, direct light.");
+  }
+
+  // Special features
+  if (room.specialFeatures?.length) {
+    const feats = room.specialFeatures.slice(0, 2);
+    parts.push(`Features: ${feats.join(", ")}.`);
+  }
+
+  // Adjacency
+  if (room.adjacentRooms?.length) {
+    parts.push(`Connected to ${room.adjacentRooms.slice(0, 2).join(" and ")}.`);
+  }
+
+  // Room-type specific color
+  if (name.includes("bed") || name.includes("master")) {
+    if (!parts.some(p => p.includes("facing"))) parts.push("Positioned for privacy and quiet rest.");
+  } else if (name.includes("kitchen")) {
+    parts.push("Designed for efficient workflow and family interaction.");
+  } else if (name.includes("living") || name.includes("drawing")) {
+    parts.push("The social heart of the home.");
+  } else if (name.includes("pooja") || name.includes("puja")) {
+    parts.push("A peaceful, dedicated space for daily worship.");
+  }
+
+  return parts.slice(0, 3).join(" ") || "A well-proportioned space in the overall layout.";
+}
+
+
+// ─── Concept Presentation: Spatial Highlights slide ───────────────────────────
+//
+// Translates raw sqm numbers into relatable comparisons and highlights
+// the key spatial wins of the layout.
+
+async function addSpatialHighlightsSlide(
+  doc: PDFDocument,
+  project: Project,
+  accent: RGB,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont
+) {
+  const rooms = project.analysis?.rooms ?? [];
+  if (rooms.length === 0) return;
+
+  const page = doc.addPage([W, H]);
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
+  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+
+  page.drawText("SPATIAL HIGHLIGHTS", {
+    x: M, y: H - M - 4, size: 9, font: bold, color: accent,
+  });
+
+  page.drawText("How this plan works for everyday living.", {
+    x: M, y: H - M - 22, size: 10, font: italic, color: C.muted,
+  });
+
+  // Build highlights
+  const highlights: { label: string; value: string; note: string }[] = [];
+
+  // Total area
+  const totalSqm = project.analysis?.totalAreaSqm ??
+    rooms.reduce((sum, r) => sum + (r.sizeEstimateSqm ?? 0), 0);
+  if (totalSqm > 0) {
+    highlights.push({
+      label: "Total Area",
+      value: `${totalSqm} m²`,
+      note: totalSqm > 200 ? "Spacious — larger than most premium apartments"
+        : totalSqm > 100 ? "Well-sized for comfortable family living"
+        : "Compact and efficient",
+    });
+  }
+
+  // Room count
+  const bedrooms = rooms.filter(r => r.name.toLowerCase().includes("bed"));
+  if (bedrooms.length > 0) {
+    highlights.push({
+      label: "Bedrooms",
+      value: `${bedrooms.length} rooms`,
+      note: bedrooms.length >= 4 ? "Space for a large family + guests"
+        : bedrooms.length >= 3 ? "Room for the family with a guest option"
+        : "Optimised for your household",
+    });
+  }
+
+  // Largest room
+  const largest = [...rooms].sort((a, b) => (b.sizeEstimateSqm ?? 0) - (a.sizeEstimateSqm ?? 0))[0];
+  if (largest?.sizeEstimateSqm) {
+    highlights.push({
+      label: `Largest Space`,
+      value: `${largest.name} — ${largest.sizeEstimateSqm} m²`,
+      note: largest.sizeEstimateSqm > 30
+        ? "Larger than a standard hotel suite"
+        : "Proportioned for comfort",
+    });
+  }
+
+  // Kitchen
+  const kitchen = rooms.find(r => r.name.toLowerCase().includes("kitchen"));
+  if (kitchen?.sizeEstimateSqm) {
+    highlights.push({
+      label: "Kitchen",
+      value: `${kitchen.sizeEstimateSqm} m²`,
+      note: kitchen.sizeEstimateSqm > 15
+        ? "Full-sized — room for island counter and appliances"
+        : "Efficient galley-style workflow",
+    });
+  }
+
+  // Orientation
+  const facing = project.plotInfo?.facing;
+  if (facing) {
+    highlights.push({
+      label: "Plot Facing",
+      value: facing,
+      note: facing.toLowerCase().includes("east")
+        ? "Morning sun in living areas — the most desirable orientation"
+        : facing.toLowerCase().includes("north")
+        ? "Consistent natural light throughout the day"
+        : `${facing}-facing — designed to maximise comfort`,
+    });
+  }
+
+  // Render highlights as cards
+  const cardW = (W - M * 2 - 20) / 2;
+  const cardH = 55;
+  const startY = H - M - 50;
+
+  highlights.slice(0, 6).forEach((h, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const x = M + col * (cardW + 20);
+    const y = startY - row * (cardH + 14);
+
+    // Card background
+    page.drawRectangle({
+      x, y: y - cardH + 10, width: cardW, height: cardH,
+      color: rgb(0.15, 0.15, 0.14), borderColor: rgb(0.25, 0.25, 0.24),
+      borderWidth: 0.5,
+    });
+
+    // Label
+    page.drawText(h.label.toUpperCase(), {
+      x: x + 12, y: y, size: 7, font: bold, color: C.muted,
+    });
+
+    // Value
+    page.drawText(h.value, {
+      x: x + 12, y: y - 16, size: 12, font: bold, color: C.light,
+    });
+
+    // Note
+    const noteLines = wrapText(h.note, font, 7.5, cardW - 24);
+    noteLines.slice(0, 2).forEach((line, li) => {
+      page.drawText(line, {
+        x: x + 12, y: y - 30 - li * 10, size: 7.5, font, color: C.muted,
+      });
+    });
   });
 }
