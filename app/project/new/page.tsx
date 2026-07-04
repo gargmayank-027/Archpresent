@@ -97,12 +97,64 @@ export default function NewProjectPage() {
     setError(null);
 
     try {
+      // If the file is a PDF, rasterize it to PNG client-side BEFORE uploading.
+      // This guarantees the server always receives a raster image, avoiding the
+      // entire chain of server-side PDF handling issues (Sharp can't decode PDFs
+      // on Vercel, pdfjs-dist + @napi-rs/canvas can't run serverless, etc.)
+      let uploadFile: File = file;
+
+      if (file.type === "application/pdf") {
+        setError(null);
+        try {
+          const pdfjsLib = await import("pdfjs-dist");
+          pdfjsLib.GlobalWorkerOptions.workerSrc =
+            `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+          const pdfData = new Uint8Array(await file.arrayBuffer());
+          const doc = await pdfjsLib.getDocument({ data: pdfData }).promise;
+
+          if (doc.numPages > 1) {
+            // Multi-page PDF — let the server split it, the review page
+            // will show the floor picker. Pass the original PDF through.
+            doc.destroy();
+          } else {
+            // Single-page PDF — render to PNG right here so the server
+            // never has to deal with PDF-to-image conversion.
+            const page = await doc.getPage(1);
+            const viewport = page.getViewport({ scale: 3 });
+            const canvas = document.createElement("canvas");
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext("2d")!;
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            await page.render({ canvasContext: ctx, viewport }).promise;
+
+            const blob = await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob(
+                (b) => b ? resolve(b) : reject(new Error("Canvas conversion failed")),
+                "image/png"
+              );
+            });
+
+            uploadFile = new File([blob], file.name.replace(/\.pdf$/i, ".png"), {
+              type: "image/png",
+            });
+
+            doc.destroy();
+          }
+        } catch (pdfErr) {
+          console.error("Client-side PDF rendering failed:", pdfErr);
+          // Fall through — let the server handle it (may fail, but better than blocking)
+        }
+      }
+
       const fd = new FormData();
       fd.append("name",       name.trim());
       fd.append("clientName", clientName.trim());
       fd.append("firmName",   firmName.trim() || "Architecture Studio");
       if (presentationType) fd.append("presentationType", presentationType);
-      fd.append("plan",       file);
+      fd.append("plan",       uploadFile);
 
       // Site context — only append if filled in
       if (city.trim())        fd.append("city",           city.trim());
@@ -459,7 +511,7 @@ export default function NewProjectPage() {
           <button type="submit" className="btn-primary"
             disabled={uploading || !file || !name || !clientName}>
             {uploading ? (
-              <><span className="spinner" /><span>Uploading…</span></>
+              <><span className="spinner" /><span>{file?.type === "application/pdf" ? "Processing PDF…" : "Uploading…"}</span></>
             ) : (
               <><span>Continue to Review</span><span>→</span></>
             )}
