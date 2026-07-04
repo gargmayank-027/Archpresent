@@ -22,6 +22,9 @@ export default function NewProjectPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Presentation type selector ──────────────────────────────────────────
+  const [presentationType, setPresentationType] = useState<"concept" | "interior" | null>(null);
+
   // ── Project meta ───────────────────────────────────────────────────────────
   const [name, setName]             = useState("");
   const [clientName, setClientName] = useState("");
@@ -98,6 +101,7 @@ export default function NewProjectPage() {
       fd.append("name",       name.trim());
       fd.append("clientName", clientName.trim());
       fd.append("firmName",   firmName.trim() || "Architecture Studio");
+      if (presentationType) fd.append("presentationType", presentationType);
       fd.append("plan",       file);
 
       // Site context — only append if filled in
@@ -126,12 +130,101 @@ export default function NewProjectPage() {
     }
   }
 
+  // ── Type selector screen ───────────────────────────────────────────────
+  if (!presentationType) {
+    return (
+      <div className="max-w-3xl mx-auto px-6 py-20">
+        <div className="text-center mb-14 fade-up fade-up-1">
+          <p className="font-mono text-[10px] tracking-[0.25em] text-stone-400 uppercase mb-4">New project</p>
+          <h1 className="font-display text-4xl font-light text-stone-900 mb-3"
+              style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+            What type of presentation?
+          </h1>
+          <p className="text-stone-500 text-sm max-w-md mx-auto">
+            Choose the right deck for where you are in the client conversation.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-6 max-w-2xl mx-auto fade-up fade-up-2">
+          {/* Concept Presentation */}
+          <button type="button" onClick={() => setPresentationType("concept")}
+            className="card p-6 text-left group hover:ring-1 hover:ring-stone-800 transition-all">
+            <div className="w-10 h-10 rounded-full border border-stone-200 flex items-center justify-center mb-4 group-hover:border-stone-400 transition-colors">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <path d="M12 18v-6" /><path d="M9 15l3-3 3 3" />
+              </svg>
+            </div>
+            <p className="font-mono text-[10px] tracking-widest uppercase text-amber-600 mb-1">First meeting</p>
+            <h3 className="text-lg font-medium text-stone-900 mb-2 group-hover:text-stone-700 transition-colors"
+                style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+              Concept Presentation
+            </h3>
+            <p className="text-sm text-stone-500 leading-relaxed mb-4">
+              Introduce the floor plan to your client with a narrative walkthrough,
+              color-coded rooms, orientation highlights, and spatial comparisons.
+              Designed to impress in the first meeting.
+            </p>
+            <span className="font-mono text-[9px] text-stone-400 uppercase tracking-widest">
+              Floor plan story · Room highlights · Sun path · Vastu
+            </span>
+          </button>
+
+          {/* Interior Presentation */}
+          <button type="button" onClick={() => setPresentationType("interior")}
+            className="card p-6 text-left group hover:ring-1 hover:ring-stone-800 transition-all">
+            <div className="w-10 h-10 rounded-full border border-stone-200 flex items-center justify-center mb-4 group-hover:border-stone-400 transition-colors">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" />
+              </svg>
+            </div>
+            <p className="font-mono text-[10px] tracking-widest uppercase text-amber-600 mb-1">Design phase</p>
+            <h3 className="text-lg font-medium text-stone-900 mb-2 group-hover:text-stone-700 transition-colors"
+                style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+              Interior Presentation
+            </h3>
+            <p className="text-sm text-stone-500 leading-relaxed mb-4">
+              Style the interiors with AI-curated moodboards — real photos
+              for every room, material palettes, and a branded PDF deck
+              ready to share with your client.
+            </p>
+            <span className="font-mono text-[9px] text-stone-400 uppercase tracking-widest">
+              Room moodboards · Style direction · Material palette
+            </span>
+          </button>
+        </div>
+
+        <div className="text-center mt-8">
+          <a href="/dashboard" className="font-mono text-[10px] text-stone-400 hover:text-stone-600 uppercase tracking-widest transition-colors">
+            ← Back to projects
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl mx-auto px-6 py-12">
       {/* Header */}
       <div className="mb-10 fade-up fade-up-1">
         <div className="flex items-center justify-between mb-8">
           <StepIndicator steps={STEPS} />
+          <button type="button" onClick={() => setPresentationType(null)}
+            className="font-mono text-[9px] text-stone-400 hover:text-stone-600 uppercase tracking-widest transition-colors">
+            ← Change type
+          </button>
+        </div>
+        <div className="flex items-center gap-3 mb-2">
+          <span className={`font-mono text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-sm ${
+            presentationType === "concept"
+              ? "bg-amber-100 text-amber-700 border border-amber-200"
+              : "bg-blue-50 text-blue-600 border border-blue-200"
+          }`}>
+            {presentationType === "concept" ? "Concept" : "Interior"}
+          </span>
         </div>
         <h1 className="font-display text-4xl font-light text-stone-900 mb-2"
             style={{ fontFamily: "'Cormorant Garamond', serif" }}>

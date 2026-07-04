@@ -152,9 +152,13 @@ export async function POST(req: NextRequest) {
 
     // ── Create project ──────────────────────────────────────────────────────
     const userId = await getUserId();
+    const presTypeRaw = formData.get("presentationType");
+    const presentationType = presTypeRaw === "concept" || presTypeRaw === "interior" ? presTypeRaw : undefined;
+
     const project: Project = {
       id,
       userId: userId ?? undefined,
+      presentationType,
       name,
       clientName,
       firmName,

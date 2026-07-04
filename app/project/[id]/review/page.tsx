@@ -30,6 +30,8 @@ export default function ReviewPage() {
     { num: "4", label: "Export",     status: "pending"  as const },
   ];
 
+  const [autoRasterizing, setAutoRasterizing] = useState(false);
+
   useEffect(() => {
     fetch(`/api/projects/${id}`, { cache: "no-store" })
       .then((r) => r.json())
@@ -38,9 +40,61 @@ export default function ReviewPage() {
         if (d.project.analysis)      setAnalysis(d.project.analysis);
         if (d.project.planStrengths) setStrengths(d.project.planStrengths);
         setLoading(false);
+
+        // Auto-rasterize: if the plan image is a PDF (single-page upload
+        // that skipped the floor picker), render it to PNG client-side
+        // and upload it so the <img> tag and AI analysis can use it.
+        if (d.project.planImageUrl?.endsWith(".pdf") && d.project.floorSelectionConfirmed) {
+          autoRasterizePdf(d.project);
+        }
       })
       .catch(() => setLoading(false));
   }, [id]);
+
+  async function autoRasterizePdf(proj: Project) {
+    setAutoRasterizing(true);
+    try {
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+
+      const pdfRes = await fetch(proj.planImageUrl);
+      const pdfData = new Uint8Array(await pdfRes.arrayBuffer());
+      const doc = await pdfjsLib.getDocument({ data: pdfData }).promise;
+      const page = await doc.getPage(1);
+
+      const viewport = page.getViewport({ scale: 3 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => b ? resolve(b) : reject(new Error("Canvas to blob failed")),
+          "image/png"
+        );
+      });
+
+      const fd = new FormData();
+      fd.append("selectedPageIndex", "0");
+      fd.append("planImage", blob, "plan.png");
+
+      const res = await fetch(`/api/projects/${proj.id}/select-floor`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (res.ok && data.project) {
+        setProject(data.project);
+      }
+      doc.destroy();
+    } catch (err) {
+      console.error("Auto-rasterize failed:", err);
+    } finally {
+      setAutoRasterizing(false);
+    }
+  }
 
   async function selectFloor(pageIndex: number) {
     setSelectingFloor(true);
@@ -172,7 +226,7 @@ export default function ReviewPage() {
     }
   }
 
-  if (loading)  return <PageSkeleton />;
+  if (loading || autoRasterizing) return <PageSkeleton />;
   if (!project) return <div className="p-12 text-center text-stone-400">Project not found.</div>;
 
   // Multi-floor PDF upload — ask which floor to proceed with before showing

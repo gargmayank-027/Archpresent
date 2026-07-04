@@ -9,18 +9,12 @@ export function NavBar() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const [firm, setFirm] = useState<FirmProfile | null>(null);
-  const [aiKeysSet, setAiKeysSet] = useState(true);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   useEffect(() => {
     fetch("/api/firm")
       .then((r) => r.json())
       .then((d) => setFirm(d.firm ?? null))
-      .catch(() => {});
-
-    fetch("/api/setup-status")
-      .then((r) => r.json())
-      .then((s) => { setAiKeysSet(s.gemini === "ok" || s.anthropic === "ok" || s.openai === "ok"); })
       .catch(() => {});
   }, [pathname]);
 
@@ -69,7 +63,6 @@ export function NavBar() {
             {[
               { href: "/dashboard",   label: "Projects" },
               { href: "/project/new", label: "New"      },
-              { href: "/setup",       label: "Setup"    },
               { href: "/settings",    label: "Settings" },
             ].map((link) => (
               <a key={link.href} href={link.href}
@@ -79,9 +72,6 @@ export function NavBar() {
                     : "text-stone-400 hover:text-stone-700 hover:bg-stone-100"
                 }`}>
                 {link.label}
-                {link.href === "/setup" && !aiKeysSet && pathname !== "/setup" && (
-                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full" />
-                )}
               </a>
             ))}
           </nav>

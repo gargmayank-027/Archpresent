@@ -36,6 +36,7 @@ export interface PlanPage {
 export interface Project {
   id: string;
   userId?: string;  // owner — projects are scoped per user
+  presentationType?: "concept" | "interior";  // concept = first-meeting intro, interior = moodboard deck
   name: string;
   clientName: string;
   firmName: string;
