@@ -44,7 +44,8 @@ export default function ReviewPage() {
         // Auto-rasterize: if the plan image is a PDF (single-page upload
         // that skipped the floor picker), render it to PNG client-side
         // and upload it so the <img> tag and AI analysis can use it.
-        if (d.project.planImageUrl?.endsWith(".pdf") && d.project.floorSelectionConfirmed) {
+        const planUrl = (d.project.planImageUrl ?? "").split("?")[0].toLowerCase();
+        if (planUrl.endsWith(".pdf")) {
           autoRasterizePdf(d.project);
         }
       })
@@ -152,6 +153,33 @@ export default function ReviewPage() {
   }
 
   async function runAnalysis() {
+    if (!project) return;
+
+    // Guard: if planImageUrl is still a PDF, rasterize it first.
+    // This handles the case where auto-rasterize didn't run (e.g. older
+    // project created before this feature, or race condition on first load).
+    if (project.planImageUrl?.toLowerCase().endsWith(".pdf")) {
+      setAnalysing(true);
+      setAnalysisStep("Converting plan to image…");
+      try {
+        await autoRasterizePdf(project);
+        // Re-fetch project to get the updated PNG URL
+        const projRes = await fetch(`/api/projects/${id}`, { cache: "no-store" });
+        const projData = await projRes.json();
+        if (projData.project) {
+          setProject(projData.project);
+          // Check if it's still a PDF (rasterization failed)
+          if (projData.project.planImageUrl?.toLowerCase().endsWith(".pdf")) {
+            throw new Error("Could not convert PDF plan to image. Please re-upload as PNG or JPEG.");
+          }
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to process plan");
+        setAnalysing(false);
+        return;
+      }
+    }
+
     setAnalysing(true);
     setError(null);
     setAnalysisStep("Enhancing plan image…");

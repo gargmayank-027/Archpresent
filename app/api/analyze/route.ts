@@ -104,6 +104,17 @@ export async function POST(req: NextRequest) {
     // raster image by this point, never a raw .pdf.
     const imageUrlForAI = enhanced.enhancedUrl;
 
+    // Server-side guard: if the plan is still a PDF at this point, reject.
+    // PDFs should be rasterised client-side before analysis is triggered.
+    // This catches the case where the client didn't rasterise (old projects,
+    // race conditions, or the auto-rasterize feature failing silently).
+    if (imageUrlForAI.toLowerCase().endsWith(".pdf") ||
+        project.planImagePath.toLowerCase().endsWith(".pdf")) {
+      return NextResponse.json({
+        error: "The plan is still in PDF format. Please wait a moment for it to finish processing, then try again. If this persists, re-upload the plan as a PNG or JPEG.",
+      }, { status: 400 });
+    }
+
     console.log(`[analyze] Running AI analysis on: ${imageUrlForAI}`);
     let analysis;
     try {
