@@ -420,22 +420,36 @@ async function addPlanSlide(
   });
 
   // Plan image — left 70% of slide
+  // Use the color-coded rendered plan if available, otherwise the original B&W
   const planW = W * 0.68;
   const planH = H - 80;
+  const planSource = project.renderedPlanUrl ?? project.planImagePath;
 
   try {
-    const imgBytes = await loadImageBytes(project.planImagePath);
+    const imgBytes = await loadImageBytes(planSource);
     if (!imgBytes) throw new Error("Could not load plan image");
-    const ext      = project.planImagePath.split(".").pop()?.toLowerCase();
+    const ext      = planSource.split(".").pop()?.toLowerCase();
     const pdfImg   = ext === "png" ? await doc.embedPng(imgBytes) : await doc.embedJpg(imgBytes);
     const dims     = pdfImg.scaleToFit(planW - M * 2, planH - 20);
     const ix       = M + (planW - M * 2 - dims.width) / 2;
     const iy       = (planH - dims.height) / 2 + 20;
     page.drawImage(pdfImg, { x: ix, y: iy, width: dims.width, height: dims.height });
   } catch {
-    page.drawRectangle({ x: M, y: 40, width: planW - M * 2, height: planH - 20,
-      color: rgb(0.2, 0.2, 0.2) });
-    page.drawText("[Floor Plan]", { x: planW / 2 - 40, y: H / 2, size: 12, font, color: C.muted });
+    // Fallback: try original plan if rendered failed
+    try {
+      const imgBytes = await loadImageBytes(project.planImagePath);
+      if (!imgBytes) throw new Error("fallback also failed");
+      const ext    = project.planImagePath.split(".").pop()?.toLowerCase();
+      const pdfImg = ext === "png" ? await doc.embedPng(imgBytes) : await doc.embedJpg(imgBytes);
+      const dims   = pdfImg.scaleToFit(planW - M * 2, planH - 20);
+      const ix     = M + (planW - M * 2 - dims.width) / 2;
+      const iy     = (planH - dims.height) / 2 + 20;
+      page.drawImage(pdfImg, { x: ix, y: iy, width: dims.width, height: dims.height });
+    } catch {
+      page.drawRectangle({ x: M, y: 40, width: planW - M * 2, height: planH - 20,
+        color: rgb(0.2, 0.2, 0.2) });
+      page.drawText("[Floor Plan]", { x: planW / 2 - 40, y: H / 2, size: 12, font, color: C.muted });
+    }
   }
 
   // Room list — right panel

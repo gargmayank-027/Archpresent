@@ -43,6 +43,7 @@ export interface Project {
   planImageUrl: string; // relative URL served from /uploads/ — the ACTIVE floor plan
   planImagePath: string; // absolute disk path (for PDF generation) — the ACTIVE floor plan
   originalPlanImageUrl?: string;  // pre-enhancement version
+  renderedPlanUrl?: string;       // color-coded plan with room overlays
   enhancementNotes?: string[];    // what Sharp did to the image
   planPages?: PlanPage[];             // all pages, populated when the upload was a multi-page PDF
   selectedPageIndex?: number;         // which planPages[] entry is currently active (0-indexed)

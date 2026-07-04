@@ -146,10 +146,28 @@ export async function POST(req: NextRequest) {
       ];
     }
 
-    // Step E — persist final result
+    // Step E — generate color-coded rendered plan
+    let renderedPlanUrl: string | undefined;
+    try {
+      const { renderAndSavePlan } = await import("@/lib/planRenderer");
+      const roomsWithBoxes = analysis.rooms.filter((r: any) => r.boundingBox);
+      if (roomsWithBoxes.length > 0) {
+        // Use the enhanced plan if available, otherwise original
+        const planPath = enhanced.enhancedDiskPath ?? project.planImagePath;
+        renderedPlanUrl = await renderAndSavePlan(planPath, projectId, analysis.rooms, project.plotInfo);
+        console.log(`[analyze] Rendered plan generated: ${renderedPlanUrl}`);
+      } else {
+        console.log("[analyze] No bounding boxes — skipping rendered plan");
+      }
+    } catch (renderErr) {
+      console.warn("[analyze] Rendered plan generation failed (non-fatal):", renderErr);
+    }
+
+    // Step F — persist final result
     await projectStore.update(projectId, {
       analysis,
       planStrengths,
+      ...(renderedPlanUrl ? { renderedPlanUrl } : {}),
       status: "analyzed",
     });
 
