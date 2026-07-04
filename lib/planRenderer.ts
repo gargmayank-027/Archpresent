@@ -23,30 +23,30 @@ interface RoomColor {
 }
 
 const ROOM_COLORS: Record<string, RoomColor> = {
-  // Bedrooms
-  bedroom:    { fill: "#DBEAFE", stroke: "#93C5FD", label: "Bedrooms" },
-  // Living / Drawing
-  living:     { fill: "#D1FAE5", stroke: "#6EE7B7", label: "Living" },
-  // Kitchen
-  kitchen:    { fill: "#FEF3C7", stroke: "#FCD34D", label: "Kitchen" },
-  // Dining
-  dining:     { fill: "#FFE4E6", stroke: "#FDA4AF", label: "Dining" },
-  // Bathroom / Toilet
-  bathroom:   { fill: "#E5E7EB", stroke: "#9CA3AF", label: "Bath" },
-  // Dressing / Wardrobe
-  dressing:   { fill: "#EDE9FE", stroke: "#C4B5FD", label: "Dressing" },
-  // Pooja / Prayer
-  pooja:      { fill: "#FEF0CD", stroke: "#F6C547", label: "Pooja" },
-  // Balcony / Outdoor
-  outdoor:    { fill: "#D1FAE5", stroke: "#34D399", label: "Outdoor" },
-  // Lobby / Entry
-  lobby:      { fill: "#FEF9C3", stroke: "#FDE047", label: "Lobby" },
-  // Study / Office
-  study:      { fill: "#DBEAFE", stroke: "#60A5FA", label: "Study" },
-  // Utility
-  utility:    { fill: "#F3F4F6", stroke: "#D1D5DB", label: "Utility" },
+  // Bedrooms — calm blue
+  bedroom:    { fill: "#BFDBFE", stroke: "#3B82F6", label: "Bedrooms" },
+  // Living / Drawing — warm green
+  living:     { fill: "#BBF7D0", stroke: "#22C55E", label: "Living" },
+  // Kitchen — warm amber
+  kitchen:    { fill: "#FDE68A", stroke: "#F59E0B", label: "Kitchen" },
+  // Dining — soft coral
+  dining:     { fill: "#FECACA", stroke: "#EF4444", label: "Dining" },
+  // Bathroom / Toilet — cool grey
+  bathroom:   { fill: "#D1D5DB", stroke: "#6B7280", label: "Bath" },
+  // Dressing / Wardrobe — soft purple
+  dressing:   { fill: "#DDD6FE", stroke: "#8B5CF6", label: "Dressing" },
+  // Pooja / Prayer — saffron
+  pooja:      { fill: "#FED7AA", stroke: "#EA580C", label: "Pooja" },
+  // Balcony / Outdoor — teal
+  outdoor:    { fill: "#99F6E4", stroke: "#14B8A6", label: "Outdoor" },
+  // Lobby / Entry — warm cream
+  lobby:      { fill: "#FEF08A", stroke: "#CA8A04", label: "Lobby" },
+  // Study / Office — steel blue
+  study:      { fill: "#BAE6FD", stroke: "#0284C7", label: "Study" },
+  // Utility — muted
+  utility:    { fill: "#E5E7EB", stroke: "#9CA3AF", label: "Utility" },
   // Default
-  default:    { fill: "#F9FAFB", stroke: "#E5E7EB", label: "Other" },
+  default:    { fill: "#F3F4F6", stroke: "#D1D5DB", label: "Other" },
 };
 
 function getRoomColor(roomName: string): RoomColor {
@@ -88,45 +88,61 @@ function buildOverlaySvg(
   const { showLegend = true, showCompass = true, showLabels = true } = options ?? {};
 
   const roomsWithBox = rooms.filter((r) => r.boundingBox);
-  const usedColorKeys = new Set<string>();
 
-  // Room overlays
+  // Room overlays — high opacity fills with label pill backgrounds
   const roomRects = roomsWithBox.map((room) => {
     const box = room.boundingBox!;
     const color = getRoomColor(room.name);
-    usedColorKeys.add(room.name);
 
     const x = Math.round(box.x * imgWidth);
     const y = Math.round(box.y * imgHeight);
     const w = Math.round(box.width * imgWidth);
     const h = Math.round(box.height * imgHeight);
 
-    // Scale font size relative to box size — smaller rooms get smaller text
-    const fontSize = Math.max(9, Math.min(14, Math.round(Math.min(w, h) * 0.09)));
-    const sizeFont = Math.max(7, fontSize - 2);
-    const labelY = y + h / 2;
+    // Scale font size relative to box dimensions
+    const minDim = Math.min(w, h);
+    const fontSize = Math.max(10, Math.min(16, Math.round(minDim * 0.10)));
+    const sizeFont = Math.max(8, fontSize - 2);
 
-    // Shorten display name for small boxes
-    const displayName = w < 80 ? room.name.replace(/Room/gi, "Rm").replace(/Area/gi, "") : room.name;
+    const displayName = w < 100
+      ? room.name.replace(/Room/gi, "Rm").replace(/Area/gi, "").replace(/Dressing/gi, "Dress")
+      : room.name;
     const sizeLabel = room.sizeEstimateSqm ? `${room.sizeEstimateSqm} m²` : "";
+
+    // Label pill dimensions
+    const nameWidth = displayName.length * fontSize * 0.55;
+    const sizeWidth = sizeLabel ? sizeLabel.length * sizeFont * 0.6 : 0;
+    const pillW = Math.max(nameWidth, sizeWidth) + 16;
+    const pillH = sizeLabel ? fontSize + sizeFont + 14 : fontSize + 10;
+    const pillX = x + w / 2 - pillW / 2;
+    const pillY = y + h / 2 - pillH / 2;
 
     return `
       <!-- ${room.name} -->
       <rect x="${x}" y="${y}" width="${w}" height="${h}"
-        fill="${color.fill}" fill-opacity="0.55"
-        stroke="${color.stroke}" stroke-width="1.5" rx="2" />
+        fill="${color.fill}" fill-opacity="0.75"
+        stroke="${color.stroke}" stroke-width="2.5" rx="3" />
+
       ${showLabels ? `
-        <text x="${x + w / 2}" y="${labelY - (sizeLabel ? 4 : 0)}"
+        <!-- Label background pill -->
+        <rect x="${pillX}" y="${pillY}" width="${pillW}" height="${pillH}"
+          fill="white" fill-opacity="0.92" rx="4"
+          stroke="${color.stroke}" stroke-width="0.5" stroke-opacity="0.3" />
+
+        <!-- Room name -->
+        <text x="${x + w / 2}" y="${pillY + (sizeLabel ? fontSize + 2 : pillH / 2 + 1)}"
           text-anchor="middle" dominant-baseline="middle"
-          font-family="'Instrument Sans', system-ui, sans-serif"
-          font-size="${fontSize}" font-weight="600" fill="#1F2937"
-          letter-spacing="0.02em">
+          font-family="Helvetica, Arial, sans-serif"
+          font-size="${fontSize}" font-weight="700" fill="#1a1917"
+          letter-spacing="0.03em">
           ${escapeXml(displayName)}
         </text>
+
         ${sizeLabel ? `
-          <text x="${x + w / 2}" y="${labelY + fontSize - 1}"
+          <!-- Area -->
+          <text x="${x + w / 2}" y="${pillY + fontSize + sizeFont + 6}"
             text-anchor="middle" dominant-baseline="middle"
-            font-family="'DM Mono', monospace"
+            font-family="Helvetica, Arial, sans-serif"
             font-size="${sizeFont}" fill="#6B7280">
             ${sizeLabel}
           </text>
@@ -135,12 +151,11 @@ function buildOverlaySvg(
     `;
   }).join("\n");
 
-  // Compass rose (top-right corner)
+  // Compass rose — larger, clearer
   const compass = showCompass && plotInfo?.facing ? (() => {
-    const cx = imgWidth - 50;
-    const cy = 50;
-    const r = 28;
-    // Rotate based on facing — "East" means the plot faces East
+    const cx = imgWidth - 60;
+    const cy = 60;
+    const r = 32;
     const facingDeg: Record<string, number> = {
       north: 0, "north-east": 45, east: 90, "south-east": 135,
       south: 180, "south-west": 225, west: 270, "north-west": 315,
@@ -149,25 +164,28 @@ function buildOverlaySvg(
 
     return `
       <g transform="translate(${cx}, ${cy})">
-        <circle r="${r + 6}" fill="white" fill-opacity="0.85" stroke="#E5E7EB" stroke-width="1" />
+        <circle r="${r + 8}" fill="white" fill-opacity="0.95"
+          stroke="#D1D5DB" stroke-width="1.5" />
         <g transform="rotate(${rotation})">
-          <!-- North pointer -->
-          <polygon points="0,${-r} -6,6 6,6" fill="#1F2937" />
-          <!-- South pointer -->
-          <polygon points="0,${r} -6,-6 6,-6" fill="#D1D5DB" />
-          <!-- East/West lines -->
-          <line x1="${-r + 8}" y1="0" x2="${r - 8}" y2="0" stroke="#D1D5DB" stroke-width="1" />
+          <polygon points="0,${-r} -7,4 7,4" fill="#1F2937" />
+          <polygon points="0,${r} -7,-4 7,-4" fill="#D1D5DB" />
+          <line x1="${-r + 10}" y1="0" x2="${r - 10}" y2="0"
+            stroke="#E5E7EB" stroke-width="1.5" />
         </g>
-        <text x="0" y="${-r - 4}" text-anchor="middle"
-          font-family="'DM Mono', monospace" font-size="7" fill="#6B7280"
-          letter-spacing="0.15em">N</text>
+        <text x="0" y="${-r - 6}" text-anchor="middle"
+          font-family="Helvetica, Arial, sans-serif"
+          font-size="9" font-weight="700" fill="#374151"
+          letter-spacing="0.2em">N</text>
+        <text x="0" y="${r + 14}" text-anchor="middle"
+          font-family="Helvetica, Arial, sans-serif"
+          font-size="7" fill="#9CA3AF"
+          letter-spacing="0.1em">${escapeXml((plotInfo.facing ?? "").toUpperCase())}</text>
       </g>
     `;
   })() : "";
 
-  // Legend strip at bottom
+  // Legend strip — solid white bar at bottom with clear swatches
   const legend = showLegend ? (() => {
-    // Collect unique room type colors used
     const legendItems: { color: RoomColor; label: string }[] = [];
     const seen = new Set<string>();
     for (const room of roomsWithBox) {
@@ -178,24 +196,26 @@ function buildOverlaySvg(
       }
     }
 
-    const legendHeight = 32;
+    const legendHeight = 40;
     const legendY = imgHeight - legendHeight;
-    const itemWidth = Math.min(100, (imgWidth - 40) / legendItems.length);
+    const totalItemsWidth = legendItems.length * 95;
+    const startX = Math.max(16, (imgWidth - totalItemsWidth) / 2);
 
     const items = legendItems.map((item, i) => {
-      const ix = 20 + i * itemWidth;
+      const ix = startX + i * 95;
       return `
-        <rect x="${ix}" y="${legendY + 10}" width="12" height="12" rx="2"
-          fill="${item.color.fill}" stroke="${item.color.stroke}" stroke-width="1" />
-        <text x="${ix + 18}" y="${legendY + 19}"
-          font-family="'DM Mono', monospace" font-size="8" fill="#6B7280"
-          letter-spacing="0.1em">${item.label}</text>
+        <rect x="${ix}" y="${legendY + 14}" width="14" height="14" rx="3"
+          fill="${item.color.fill}" stroke="${item.color.stroke}" stroke-width="1.5" />
+        <text x="${ix + 20}" y="${legendY + 24}"
+          font-family="Helvetica, Arial, sans-serif"
+          font-size="9" fill="#374151" font-weight="500"
+          letter-spacing="0.05em">${item.label}</text>
       `;
     }).join("\n");
 
     return `
       <rect x="0" y="${legendY}" width="${imgWidth}" height="${legendHeight}"
-        fill="white" fill-opacity="0.9" />
+        fill="white" fill-opacity="0.95" />
       <line x1="0" y1="${legendY}" x2="${imgWidth}" y2="${legendY}"
         stroke="#E5E7EB" stroke-width="1" />
       ${items}
