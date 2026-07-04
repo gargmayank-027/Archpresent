@@ -1118,61 +1118,99 @@ async function addRoomWalkthroughSlide(
 }
 
 /**
- * Build a short narrative description of a room using its detection data.
- * Written in second person for the client: "Your bedroom faces east…"
+ * Build a short narrative description of a room for the client walkthrough.
+ * Written in second person, varied per room type, avoiding generic filler.
  */
 function buildRoomNarrative(room: import("@/types").RoomDetail, plotInfo?: import("@/types").PlotInfo): string {
-  const parts: string[] = [];
   const name = room.name.toLowerCase();
+  const sqm = room.sizeEstimateSqm;
+  const orient = (room.orientation ?? "").toLowerCase();
+  const features = room.specialFeatures ?? [];
+  const adjacent = room.adjacentRooms ?? [];
 
-  // Size context
-  if (room.sizeEstimateSqm) {
-    const sqm = room.sizeEstimateSqm;
-    if (sqm > 30) parts.push(`At ${sqm} sqm, this is a generously proportioned space.`);
-    else if (sqm > 18) parts.push(`A comfortable ${sqm} sqm — well-sized for its purpose.`);
-    else if (sqm > 10) parts.push(`A compact but efficient ${sqm} sqm.`);
-    else parts.push(`${sqm} sqm — thoughtfully planned.`);
+  // ── Room-type-specific openers ──────────────────────────────────────
+  if (name.includes("master") || (name.includes("bed") && name.includes("1"))) {
+    const parts = [`Your primary bedroom${sqm ? ` (${sqm} sqm)` : ""} is positioned for privacy.`];
+    if (orient.includes("east")) parts.push("Morning light wakes the room naturally — no alarm needed.");
+    else if (orient.includes("north")) parts.push("North-facing for even, glare-free daylight throughout the day.");
+    if (features.some(f => f.toLowerCase().includes("walk-in") || f.toLowerCase().includes("wardrobe")))
+      parts.push("The attached walk-in keeps the bedroom clutter-free.");
+    if (adjacent.some(a => a.toLowerCase().includes("dress") || a.toLowerCase().includes("toilet")))
+      parts.push("Dressing and bathroom are directly accessible — a self-contained suite.");
+    return parts.join(" ");
   }
 
-  // Orientation
-  if (room.orientation) {
-    const orient = room.orientation.toLowerCase();
-    if (orient.includes("east")) parts.push("East-facing, it catches the morning sun.");
-    else if (orient.includes("west")) parts.push("West-facing, it gets warm afternoon light.");
-    else if (orient.includes("north")) parts.push("North-facing for consistent, soft daylight.");
-    else if (orient.includes("south")) parts.push("South-facing with bright, direct light.");
+  if (name.includes("bed")) {
+    const parts = [`This bedroom${sqm ? ` at ${sqm} sqm` : ""} is well-proportioned for comfortable daily use.`];
+    if (orient) parts.push(orient.includes("east") ? "East-facing for fresh morning light." : orient.includes("west") ? "Afternoon warmth from the west." : "");
+    if (features.length) parts.push(`Includes ${features[0].toLowerCase()}.`);
+    return parts.filter(Boolean).join(" ");
   }
 
-  // Special features
-  if (room.specialFeatures?.length) {
-    const feats = room.specialFeatures.slice(0, 2);
-    parts.push(`Features: ${feats.join(", ")}.`);
+  if (name.includes("drawing") || name.includes("living")) {
+    const parts = [`The main living space${sqm ? ` (${sqm} sqm)` : ""} is where your family gathers and guests are welcomed.`];
+    if (orient.includes("east")) parts.push("East-facing — bright and inviting through the morning hours.");
+    if (features.some(f => f.toLowerCase().includes("double height"))) parts.push("Double-height volume gives it a sense of grandeur.");
+    if (features.some(f => f.toLowerCase().includes("deck"))) parts.push("The attached deck extends the living space outdoors.");
+    return parts.join(" ");
   }
 
-  // Adjacency
-  if (room.adjacentRooms?.length) {
-    parts.push(`Connected to ${room.adjacentRooms.slice(0, 2).join(" and ")}.`);
+  if (name.includes("kitchen")) {
+    const parts = [`The kitchen${sqm ? ` (${sqm} sqm)` : ""} is designed for efficient workflow.`];
+    if (adjacent.some(a => a.toLowerCase().includes("dining") || a.toLowerCase().includes("lobby")))
+      parts.push("Direct access to the dining area keeps serving seamless.");
+    if (adjacent.some(a => a.toLowerCase().includes("servant") || a.toLowerCase().includes("utility")))
+      parts.push("A connected service area handles the heavy-duty work.");
+    return parts.join(" ");
   }
 
-  // Room-type specific color
-  if (name.includes("bed") || name.includes("master")) {
-    if (!parts.some(p => p.includes("facing"))) parts.push("Positioned for privacy and quiet rest.");
-  } else if (name.includes("kitchen")) {
-    parts.push("Designed for efficient workflow and family interaction.");
-  } else if (name.includes("living") || name.includes("drawing")) {
-    parts.push("The social heart of the home.");
-  } else if (name.includes("pooja") || name.includes("puja")) {
-    parts.push("A peaceful, dedicated space for daily worship.");
+  if (name.includes("lobby") || name.includes("dining") || name.includes("dinning")) {
+    const parts = [`The lobby and dining area${sqm ? ` (${sqm} sqm)` : ""} forms the circulation spine of the home.`];
+    parts.push("It connects the social and private zones while providing a generous dining space for family meals.");
+    return parts.join(" ");
   }
 
-  return parts.slice(0, 3).join(" ") || "A well-proportioned space in the overall layout.";
+  if (name.includes("pooja") || name.includes("puja")) {
+    return `A dedicated prayer space${sqm ? ` (${sqm} sqm)` : ""} — quiet, inward-facing, and positioned per tradition. ${orient.includes("east") ? "East-facing for morning worship." : ""}`.trim();
+  }
+
+  if (name.includes("dress") || name.includes("w.i.w") || name.includes("wardrobe")) {
+    return `Attached dressing area${sqm ? ` (${sqm} sqm)` : ""} with room for organised storage — keeping the bedroom itself clean and restful.`;
+  }
+
+  if (name.includes("toilet") || name.includes("bath")) {
+    const attached = adjacent.length ? `Serves ${adjacent[0]}.` : "";
+    return `${sqm ? `${sqm} sqm` : "A compact"} bathroom designed for efficient daily use. ${attached}`.trim();
+  }
+
+  if (name.includes("porch") || name.includes("entry")) {
+    return `The entry porch${sqm ? ` (${sqm} sqm)` : ""} creates a transition from the street to the home — a moment of arrival before stepping inside.`;
+  }
+
+  if (name.includes("stair")) {
+    return `The staircase area${sqm ? ` (${sqm} sqm)` : ""} provides vertical circulation between floors.`;
+  }
+
+  if (name.includes("servant") || name.includes("utility") || name.includes("maid")) {
+    return `Service area${sqm ? ` (${sqm} sqm)` : ""} — kept separate from the main living spaces for practical daily operation.`;
+  }
+
+  if (name.includes("lift")) {
+    return `Future-ready lift provision${sqm ? ` (${sqm} sqm)` : ""} — adds convenience and long-term accessibility to the home.`;
+  }
+
+  // Generic fallback
+  const parts = [`${room.name}${sqm ? ` (${sqm} sqm)` : ""}`];
+  if (orient) parts.push(`${orient.charAt(0).toUpperCase() + orient.slice(1)}-oriented.`);
+  if (features.length) parts.push(`Features: ${features.slice(0, 2).join(", ")}.`);
+  return parts.join(" — ") + ".";
 }
 
 
 // ─── Concept Presentation: Spatial Highlights slide ───────────────────────────
 //
-// Translates raw sqm numbers into relatable comparisons and highlights
-// the key spatial wins of the layout.
+// Lifestyle-focused insights about the plan — not just numbers, but what
+// those numbers mean for daily living.
 
 async function addSpatialHighlightsSlide(
   doc: PDFDocument,
@@ -1189,114 +1227,134 @@ async function addSpatialHighlightsSlide(
   page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
   page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
 
-  page.drawText("SPATIAL HIGHLIGHTS", {
+  page.drawText("WHY THIS PLAN WORKS", {
     x: M, y: H - M - 4, size: 9, font: bold, color: accent,
   });
 
-  page.drawText("How this plan works for everyday living.", {
+  page.drawText("The key design decisions that make this home work for everyday life.", {
     x: M, y: H - M - 22, size: 10, font: italic, color: C.muted,
   });
 
-  // Build highlights
-  const highlights: { label: string; value: string; note: string }[] = [];
+  // Build meaningful insights instead of raw stats
+  const insights: { icon: string; title: string; detail: string }[] = [];
 
-  // Total area
-  const totalSqm = project.analysis?.totalAreaSqm ??
-    rooms.reduce((sum, r) => sum + (r.sizeEstimateSqm ?? 0), 0);
-  if (totalSqm > 0) {
-    highlights.push({
-      label: "Total Area",
-      value: `${totalSqm} m²`,
-      note: totalSqm > 200 ? "Spacious — larger than most premium apartments"
-        : totalSqm > 100 ? "Well-sized for comfortable family living"
-        : "Compact and efficient",
-    });
-  }
-
-  // Room count
+  // Privacy zoning
   const bedrooms = rooms.filter(r => r.name.toLowerCase().includes("bed"));
-  if (bedrooms.length > 0) {
-    highlights.push({
-      label: "Bedrooms",
-      value: `${bedrooms.length} rooms`,
-      note: bedrooms.length >= 4 ? "Space for a large family + guests"
-        : bedrooms.length >= 3 ? "Room for the family with a guest option"
-        : "Optimised for your household",
+  const livingRooms = rooms.filter(r =>
+    r.name.toLowerCase().includes("living") || r.name.toLowerCase().includes("drawing") ||
+    r.name.toLowerCase().includes("lobby") || r.name.toLowerCase().includes("dining"));
+  if (bedrooms.length > 0 && livingRooms.length > 0) {
+    insights.push({
+      icon: "◑",
+      title: "Private & Social Zones",
+      detail: `${bedrooms.length} bedroom${bedrooms.length > 1 ? "s" : ""} are separated from the ${livingRooms.length} social space${livingRooms.length > 1 ? "s" : ""} — guests never intrude on your private areas.`,
     });
   }
 
-  // Largest room
-  const largest = [...rooms].sort((a, b) => (b.sizeEstimateSqm ?? 0) - (a.sizeEstimateSqm ?? 0))[0];
-  if (largest?.sizeEstimateSqm) {
-    highlights.push({
-      label: `Largest Space`,
-      value: `${largest.name} — ${largest.sizeEstimateSqm} m²`,
-      note: largest.sizeEstimateSqm > 30
-        ? "Larger than a standard hotel suite"
-        : "Proportioned for comfort",
-    });
-  }
-
-  // Kitchen
-  const kitchen = rooms.find(r => r.name.toLowerCase().includes("kitchen"));
-  if (kitchen?.sizeEstimateSqm) {
-    highlights.push({
-      label: "Kitchen",
-      value: `${kitchen.sizeEstimateSqm} m²`,
-      note: kitchen.sizeEstimateSqm > 15
-        ? "Full-sized — room for island counter and appliances"
-        : "Efficient galley-style workflow",
-    });
-  }
-
-  // Orientation
+  // Orientation advantage
   const facing = project.plotInfo?.facing;
   if (facing) {
-    highlights.push({
-      label: "Plot Facing",
-      value: facing,
-      note: facing.toLowerCase().includes("east")
-        ? "Morning sun in living areas — the most desirable orientation"
-        : facing.toLowerCase().includes("north")
-        ? "Consistent natural light throughout the day"
-        : `${facing}-facing — designed to maximise comfort`,
+    const f = facing.toLowerCase();
+    const benefit = f.includes("east")
+      ? "Living spaces get gentle morning sun — naturally bright without harsh glare. Bedrooms stay cool in the afternoon."
+      : f.includes("north")
+      ? "Consistent, even daylight throughout the day — ideal for Indian climates where south/west sun can be intense."
+      : f.includes("west")
+      ? "Warm afternoon light in the living areas — perfect for evening family time."
+      : "Balanced natural light across the home.";
+    insights.push({ icon: "☀", title: `${facing}-Facing Advantage`, detail: benefit });
+  }
+
+  // Self-contained bedroom suites
+  const suiteBedrooms = bedrooms.filter(b =>
+    (b.adjacentRooms ?? []).some(a =>
+      a.toLowerCase().includes("dress") || a.toLowerCase().includes("toilet") || a.toLowerCase().includes("bath")
+    )
+  );
+  if (suiteBedrooms.length > 0) {
+    insights.push({
+      icon: "⬚",
+      title: `${suiteBedrooms.length} Self-Contained Suite${suiteBedrooms.length > 1 ? "s" : ""}`,
+      detail: `${suiteBedrooms.length > 1 ? "Each" : "The"} bedroom has attached dressing and bathroom — no sharing, no morning queues.`,
     });
   }
 
-  // Render highlights as cards
-  const cardW = (W - M * 2 - 20) / 2;
-  const cardH = 55;
-  const startY = H - M - 50;
+  // Kitchen workflow
+  const kitchen = rooms.find(r => r.name.toLowerCase().includes("kitchen") && !r.name.toLowerCase().includes("servant"));
+  if (kitchen) {
+    const hasServiceKitchen = rooms.some(r => r.name.toLowerCase().includes("servant") || r.name.toLowerCase().includes("service"));
+    if (hasServiceKitchen) {
+      insights.push({
+        icon: "⊞",
+        title: "Dual Kitchen Setup",
+        detail: "Main kitchen for family cooking, separate service kitchen for heavy-duty work — keeps the main space clean and presentable.",
+      });
+    } else {
+      insights.push({
+        icon: "⊞",
+        title: "Efficient Kitchen",
+        detail: `${kitchen.sizeEstimateSqm ? `${kitchen.sizeEstimateSqm} sqm kitchen` : "Kitchen"} with direct dining access — cooking and serving flow naturally.`,
+      });
+    }
+  }
 
-  highlights.slice(0, 6).forEach((h, i) => {
-    const col = i % 2;
-    const row = Math.floor(i / 2);
-    const x = M + col * (cardW + 20);
-    const y = startY - row * (cardH + 14);
+  // Pooja room
+  const pooja = rooms.find(r => r.name.toLowerCase().includes("pooja") || r.name.toLowerCase().includes("puja"));
+  if (pooja) {
+    const poojaOrient = (pooja.orientation ?? "").toLowerCase();
+    insights.push({
+      icon: "◯",
+      title: "Dedicated Pooja Room",
+      detail: `A separate prayer space${poojaOrient.includes("east") ? " facing east, as per Vastu" : ""} — not a corner of another room, but a proper, peaceful space.`,
+    });
+  }
 
-    // Card background
-    page.drawRectangle({
-      x, y: y - cardH + 10, width: cardW, height: cardH,
-      color: rgb(0.15, 0.15, 0.14), borderColor: rgb(0.25, 0.25, 0.24),
-      borderWidth: 0.5,
+  // Future readiness (lift)
+  const hasLift = rooms.some(r => r.name.toLowerCase().includes("lift"));
+  if (hasLift) {
+    insights.push({
+      icon: "↕",
+      title: "Lift-Ready",
+      detail: "Lift provision built into the plan — accessibility for elderly family members and long-term convenience.",
+    });
+  }
+
+  // Render insights as rows
+  const startY = H - M - 55;
+  const rowH = 52;
+
+  insights.slice(0, 5).forEach((insight, i) => {
+    const y = startY - i * rowH;
+
+    // Icon circle
+    page.drawCircle({
+      x: M + 14, y: y - 4, size: 12,
+      color: accent, opacity: 0.15,
+    });
+    page.drawText(insight.icon, {
+      x: M + 9, y: y - 8, size: 11, font: bold, color: accent,
     });
 
-    // Label
-    page.drawText(h.label.toUpperCase(), {
-      x: x + 12, y: y, size: 7, font: bold, color: C.muted,
+    // Title
+    page.drawText(insight.title.toUpperCase(), {
+      x: M + 38, y: y, size: 8, font: bold, color: C.light,
     });
 
-    // Value
-    page.drawText(h.value, {
-      x: x + 12, y: y - 16, size: 12, font: bold, color: C.light,
-    });
-
-    // Note
-    const noteLines = wrapText(h.note, font, 7.5, cardW - 24);
-    noteLines.slice(0, 2).forEach((line, li) => {
+    // Detail
+    const detailLines = wrapText(insight.detail, font, 8.5, W - M * 2 - 50);
+    detailLines.slice(0, 2).forEach((line, li) => {
       page.drawText(line, {
-        x: x + 12, y: y - 30 - li * 10, size: 7.5, font, color: C.muted,
+        x: M + 38, y: y - 14 - li * 11, size: 8.5, font, color: C.muted,
       });
     });
+
+    // Divider
+    if (i < insights.length - 1) {
+      page.drawLine({
+        start: { x: M + 38, y: y - rowH + 12 },
+        end: { x: W - M, y: y - rowH + 12 },
+        thickness: 0.3, color: rgb(0.2, 0.2, 0.2),
+      });
+    }
   });
 }

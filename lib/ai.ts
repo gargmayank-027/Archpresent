@@ -1384,7 +1384,20 @@ Rules:
   Outdoor: Balcony, Terrace, Deck, Sit-out, Garden, Porch, Front Lawn
   Special: Pooja Room, Study, Home Office, AV Room, Gym, Library
 - Include each space as a separate room entry — do not merge sub-spaces
-- Estimate sizes from furniture scale and typical proportions
+
+CRITICAL — AREA ESTIMATION (sizeEstimateSqm):
+- READ the dimension annotations written ON the plan (e.g. "18'-7" x 14'-0"",
+  "13'-0" x 16'-0"", "5'-0" x 6'-9""). These are the ACTUAL room dimensions.
+- Convert feet-inches to metres: 1 foot = 0.3048m, 1 inch = 0.0254m.
+  Example: 18'-7" = 18×0.3048 + 7×0.0254 = 5.664m
+  Example: 14'-0" = 14×0.3048 = 4.267m
+  Area = 5.664 × 4.267 = 24.17 sqm
+- If dimensions are in metres (e.g. "3.5m x 4.2m"), multiply directly.
+- ONLY if no dimensions are visible for a room, estimate from furniture scale.
+- A typical bedroom is 12-25 sqm, NOT 200+ sqm. A toilet is 3-8 sqm.
+  If your calculation gives an unrealistic number, recheck the dimensions.
+- NEVER report a single room as larger than 50% of totalAreaSqm.
+
 - adjacentRooms must use exact same names as in rooms array
 - Set "moodboardWorthy": true for spaces with distinct interior character
   (bedrooms, living, kitchen, bathrooms, balconies, dressing rooms).

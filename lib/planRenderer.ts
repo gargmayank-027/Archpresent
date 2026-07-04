@@ -80,12 +80,13 @@ function getRoomColor(roomName: string): RoomColor {
 
 function buildOverlaySvg(
   imgWidth: number,
-  imgHeight: number,
+  imgHeight: number,  // total canvas height (plan + legend)
   rooms: RoomDetail[],
   plotInfo?: PlotInfo,
-  options?: { showLegend?: boolean; showCompass?: boolean; showLabels?: boolean }
+  options?: { showLegend?: boolean; showCompass?: boolean; showLabels?: boolean; planHeight?: number }
 ): string {
-  const { showLegend = true, showCompass = true, showLabels = true } = options ?? {};
+  const { showLegend = true, showCompass = true, showLabels = true, planHeight } = options ?? {};
+  const actualPlanH = planHeight ?? imgHeight; // where the plan image ends
 
   const roomsWithBox = rooms.filter((r) => r.boundingBox);
 
@@ -95,9 +96,9 @@ function buildOverlaySvg(
     const color = getRoomColor(room.name);
 
     const x = Math.round(box.x * imgWidth);
-    const y = Math.round(box.y * imgHeight);
+    const y = Math.round(box.y * actualPlanH);
     const w = Math.round(box.width * imgWidth);
-    const h = Math.round(box.height * imgHeight);
+    const h = Math.round(box.height * actualPlanH);
 
     // Scale font size relative to box dimensions
     const minDim = Math.min(w, h);
@@ -196,26 +197,26 @@ function buildOverlaySvg(
       }
     }
 
-    const legendHeight = 40;
-    const legendY = imgHeight - legendHeight;
+    const legendHeight = 48;
+    const legendY = actualPlanH; // starts right below the plan image
     const totalItemsWidth = legendItems.length * 95;
     const startX = Math.max(16, (imgWidth - totalItemsWidth) / 2);
 
     const items = legendItems.map((item, i) => {
       const ix = startX + i * 95;
       return `
-        <rect x="${ix}" y="${legendY + 14}" width="14" height="14" rx="3"
+        <rect x="${ix}" y="${legendY + 16}" width="14" height="14" rx="3"
           fill="${item.color.fill}" stroke="${item.color.stroke}" stroke-width="1.5" />
-        <text x="${ix + 20}" y="${legendY + 24}"
+        <text x="${ix + 22}" y="${legendY + 27}"
           font-family="Helvetica, Arial, sans-serif"
-          font-size="9" fill="#374151" font-weight="500"
+          font-size="10" fill="#374151" font-weight="500"
           letter-spacing="0.05em">${item.label}</text>
       `;
     }).join("\n");
 
     return `
       <rect x="0" y="${legendY}" width="${imgWidth}" height="${legendHeight}"
-        fill="white" fill-opacity="0.95" />
+        fill="white" />
       <line x1="0" y1="${legendY}" x2="${imgWidth}" y2="${legendY}"
         stroke="#E5E7EB" stroke-width="1" />
       ${items}
@@ -268,17 +269,34 @@ export async function renderColorCodedPlan(
   const imgWidth = metadata.width ?? 1200;
   const imgHeight = metadata.height ?? 800;
 
-  // Build the SVG overlay
-  const svgOverlay = buildOverlaySvg(imgWidth, imgHeight, rooms, plotInfo, options);
+  // Add extra space at the bottom for the legend strip
+  const legendHeight = (options?.showLegend ?? true) ? 48 : 0;
+  const canvasHeight = imgHeight + legendHeight;
+
+  // Build the SVG overlay (sized to the full canvas including legend area)
+  const svgOverlay = buildOverlaySvg(imgWidth, canvasHeight, rooms, plotInfo, {
+    ...options,
+    planHeight: imgHeight, // tell the SVG builder where the plan ends and legend begins
+  });
   const svgBuffer = Buffer.from(svgOverlay);
 
-  // Composite: original plan + SVG overlay
-  const result = await sharp(inputBuffer)
-    .composite([{ input: svgBuffer, top: 0, left: 0 }])
+  // Composite: white background → plan image (top) → SVG overlay (full canvas)
+  const result = await sharp({
+    create: {
+      width: imgWidth,
+      height: canvasHeight,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    },
+  })
+    .composite([
+      { input: inputBuffer, top: 0, left: 0 },
+      { input: svgBuffer, top: 0, left: 0 },
+    ])
     .png()
     .toBuffer();
 
-  console.log(`[planRenderer] Rendered color-coded plan: ${(result.length / 1024).toFixed(0)}KB, ${imgWidth}×${imgHeight}, ${rooms.filter(r => r.boundingBox).length} rooms overlaid`);
+  console.log(`[planRenderer] Rendered: ${(result.length / 1024).toFixed(0)}KB, ${imgWidth}×${canvasHeight}, ${rooms.filter(r => r.boundingBox).length} rooms`);
 
   return result;
 }
