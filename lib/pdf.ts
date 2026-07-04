@@ -1245,7 +1245,7 @@ async function addSpatialHighlightsSlide(
     r.name.toLowerCase().includes("lobby") || r.name.toLowerCase().includes("dining"));
   if (bedrooms.length > 0 && livingRooms.length > 0) {
     insights.push({
-      icon: "◑",
+      icon: "01",
       title: "Private & Social Zones",
       detail: `${bedrooms.length} bedroom${bedrooms.length > 1 ? "s" : ""} are separated from the ${livingRooms.length} social space${livingRooms.length > 1 ? "s" : ""} — guests never intrude on your private areas.`,
     });
@@ -1262,7 +1262,7 @@ async function addSpatialHighlightsSlide(
       : f.includes("west")
       ? "Warm afternoon light in the living areas — perfect for evening family time."
       : "Balanced natural light across the home.";
-    insights.push({ icon: "☀", title: `${facing}-Facing Advantage`, detail: benefit });
+    insights.push({ icon: "02", title: `${facing}-Facing Advantage`, detail: benefit });
   }
 
   // Self-contained bedroom suites
@@ -1273,7 +1273,7 @@ async function addSpatialHighlightsSlide(
   );
   if (suiteBedrooms.length > 0) {
     insights.push({
-      icon: "⬚",
+      icon: "03",
       title: `${suiteBedrooms.length} Self-Contained Suite${suiteBedrooms.length > 1 ? "s" : ""}`,
       detail: `${suiteBedrooms.length > 1 ? "Each" : "The"} bedroom has attached dressing and bathroom — no sharing, no morning queues.`,
     });
@@ -1285,13 +1285,13 @@ async function addSpatialHighlightsSlide(
     const hasServiceKitchen = rooms.some(r => r.name.toLowerCase().includes("servant") || r.name.toLowerCase().includes("service"));
     if (hasServiceKitchen) {
       insights.push({
-        icon: "⊞",
+        icon: "04",
         title: "Dual Kitchen Setup",
         detail: "Main kitchen for family cooking, separate service kitchen for heavy-duty work — keeps the main space clean and presentable.",
       });
     } else {
       insights.push({
-        icon: "⊞",
+        icon: "04",
         title: "Efficient Kitchen",
         detail: `${kitchen.sizeEstimateSqm ? `${kitchen.sizeEstimateSqm} sqm kitchen` : "Kitchen"} with direct dining access — cooking and serving flow naturally.`,
       });
@@ -1303,7 +1303,7 @@ async function addSpatialHighlightsSlide(
   if (pooja) {
     const poojaOrient = (pooja.orientation ?? "").toLowerCase();
     insights.push({
-      icon: "◯",
+      icon: "05",
       title: "Dedicated Pooja Room",
       detail: `A separate prayer space${poojaOrient.includes("east") ? " facing east, as per Vastu" : ""} — not a corner of another room, but a proper, peaceful space.`,
     });
@@ -1313,7 +1313,7 @@ async function addSpatialHighlightsSlide(
   const hasLift = rooms.some(r => r.name.toLowerCase().includes("lift"));
   if (hasLift) {
     insights.push({
-      icon: "↕",
+      icon: "06",
       title: "Lift-Ready",
       detail: "Lift provision built into the plan — accessibility for elderly family members and long-term convenience.",
     });
