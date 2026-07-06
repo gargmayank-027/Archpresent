@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
+import { FloodFillRenderer } from "@/components/FloodFillRenderer";
 import type { Project, PlanAnalysis, PlotInfo } from "@/types";
 
 export default function ReviewPage() {
@@ -349,7 +350,7 @@ export default function ReviewPage() {
             <div className="flex items-center justify-between mb-3">
               <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">Floor Plan</p>
               <div className="flex items-center gap-0 border border-stone-200 rounded-sm overflow-hidden">
-                {project.renderedPlanUrl && (
+                {analysis?.rooms?.some(r => r.boundingBox) && (
                   <button type="button"
                     onClick={() => { setShowOriginal(false); setShowRendered(true); }}
                     className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest transition-colors ${
@@ -378,20 +379,40 @@ export default function ReviewPage() {
             </div>
 
             <div className="card p-4 bg-white relative overflow-hidden">
-              <img
-                src={
-                  showRendered && project.renderedPlanUrl
-                    ? project.renderedPlanUrl
-                    : showOriginal
-                    ? (project.originalPlanImageUrl ?? project.planImageUrl)
-                    : project.planImageUrl
-                }
-                alt={project.name}
-                className="w-full object-contain max-h-[480px] rounded-sm transition-opacity duration-300"
-                style={{ imageRendering: "crisp-edges" }}
-              />
+              {showRendered && analysis?.rooms ? (
+                <FloodFillRenderer
+                  planImageUrl={project.planImageUrl}
+                  rooms={analysis.rooms}
+                  plotInfo={project.plotInfo}
+                  height={480}
+                  onRendered={async (blob) => {
+                    // Upload the flood-filled PNG as the rendered plan
+                    try {
+                      const fd = new FormData();
+                      fd.append("projectId", project.id);
+                      fd.append("renderedPlan", blob, "rendered.png");
+                      const res = await fetch("/api/render-plan/upload", { method: "POST", body: fd });
+                      if (res.ok) {
+                        const data = await res.json();
+                        setProject((p) => p ? { ...p, renderedPlanUrl: data.renderedPlanUrl } : p);
+                      }
+                    } catch { /* non-fatal — the canvas display is already showing the result */ }
+                  }}
+                />
+              ) : (
+                <img
+                  src={
+                    showOriginal
+                      ? (project.originalPlanImageUrl ?? project.planImageUrl)
+                      : project.planImageUrl
+                  }
+                  alt={project.name}
+                  className="w-full object-contain max-h-[480px] rounded-sm"
+                  style={{ imageRendering: "crisp-edges" }}
+                />
+              )}
               {showRendered && (
-                <div className="absolute top-3 right-3">
+                <div className="absolute top-3 right-3 z-10">
                   <span className="bg-emerald-100 border border-emerald-300 text-emerald-700 font-mono text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-sm">
                     Color-coded
                   </span>
