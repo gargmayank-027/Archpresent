@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Project, FirmProfile } from "@/types";
 import { ProjectCardMenu } from "@/components/ProjectCardMenu";
 
 export default function HomePage() {
+  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [firm,     setFirm]     = useState<FirmProfile | null>(null);
   const [loading,  setLoading]  = useState(true);
@@ -17,10 +19,16 @@ export default function HomePage() {
       fetch("/api/firm").then((r) => r.json()),
     ]).then(([pd, fd]) => {
       setProjects(pd.projects ?? []);
-      setFirm(fd.firm ?? null);
+      const firmData = fd.firm ?? null;
+      setFirm(firmData);
+      // Redirect to onboarding if no firm profile exists
+      if (!firmData) {
+        router.replace("/onboarding");
+        return;
+      }
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, []);
+  }, [router]);
 
   const filtered = filter === "all"
     ? projects

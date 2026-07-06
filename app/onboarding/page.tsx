@@ -79,9 +79,12 @@ export default function OnboardingPage() {
         throw new Error(d.error ?? "Save failed");
       }
 
-      router.push("/dashboard");
+      // Small delay to let Vercel Blob settle, then redirect
+      await new Promise((r) => setTimeout(r, 500));
+      window.location.href = "/dashboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
       setSaving(false);
     }
   }
