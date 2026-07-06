@@ -41,18 +41,18 @@ interface Props {
 // ── Room type → color ────────────────────────────────────────────────────
 
 const ROOM_COLORS: Record<string, { r: number; g: number; b: number; label: string }> = {
-  bedroom:  { r: 191, g: 219, b: 254, label: "Bedrooms" },
-  living:   { r: 187, g: 247, b: 208, label: "Living" },
-  kitchen:  { r: 253, g: 230, b: 138, label: "Kitchen" },
-  dining:   { r: 254, g: 202, b: 202, label: "Dining" },
-  bathroom: { r: 209, g: 213, b: 219, label: "Bath" },
-  dressing: { r: 221, g: 214, b: 254, label: "Dressing" },
-  pooja:    { r: 254, g: 215, b: 170, label: "Pooja" },
-  outdoor:  { r: 153, g: 246, b: 228, label: "Outdoor" },
-  lobby:    { r: 254, g: 240, b: 138, label: "Lobby" },
-  study:    { r: 186, g: 230, b: 253, label: "Study" },
-  utility:  { r: 229, g: 231, b: 235, label: "Utility" },
-  default:  { r: 243, g: 244, b: 246, label: "Other" },
+  bedroom:  { r: 147, g: 197, b: 253, label: "Bedrooms" },    // stronger blue
+  living:   { r: 134, g: 239, b: 172, label: "Living" },      // vivid green
+  kitchen:  { r: 253, g: 211, b: 77,  label: "Kitchen" },     // strong amber
+  dining:   { r: 252, g: 165, b: 165, label: "Dining" },      // clear coral
+  bathroom: { r: 180, g: 186, b: 197, label: "Bath" },        // cool grey
+  dressing: { r: 196, g: 181, b: 253, label: "Dressing" },    // strong purple
+  pooja:    { r: 251, g: 176, b: 100, label: "Pooja" },       // deep saffron
+  outdoor:  { r: 94,  g: 234, b: 212, label: "Outdoor" },     // vivid teal
+  lobby:    { r: 253, g: 224, b: 102, label: "Lobby" },       // warm yellow
+  study:    { r: 125, g: 211, b: 252, label: "Study" },       // sky blue
+  utility:  { r: 209, g: 213, b: 219, label: "Utility" },     // muted
+  default:  { r: 229, g: 231, b: 235, label: "Other" },
 };
 
 function getRoomColor(name: string): { r: number; g: number; b: number; label: string } {
@@ -163,8 +163,12 @@ function floodFill(
 }
 
 /**
- * Try flood-filling from multiple seed points within a bounding box.
- * The center might land on furniture or a label — try offset points too.
+ * Try flood-filling a room by scanning a grid of seed points within
+ * the bounding box and picking the one in the clearest area.
+ *
+ * The previous approach tried 9 fixed positions — this scans a 5x5 grid
+ * (25 points) and for each, checks a small neighborhood to find one
+ * that's in open space (not on furniture, text, or hatching).
  */
 function floodFillRoom(
   imageData: ImageData,
@@ -174,29 +178,58 @@ function floodFillRoom(
   color: { r: number; g: number; b: number },
   alpha: number
 ): number {
-  const cx = Math.round((box.x + box.width / 2) * imgW);
-  const cy = Math.round((box.y + box.height / 2) * imgH);
+  const { data, width } = imageData;
 
-  // Try center first
-  let filled = floodFill(imageData, cx, cy, color, alpha);
-  if (filled > 100) return filled;
-
-  // Center failed (landed on furniture/text) — try offset points
-  const offsets = [
-    [0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7],  // quadrants
-    [0.5, 0.3], [0.5, 0.7], [0.3, 0.5], [0.7, 0.5],  // midpoints
-  ];
-
-  for (const [fx, fy] of offsets) {
-    const px = Math.round((box.x + box.width * fx) * imgW);
-    const py = Math.round((box.y + box.height * fy) * imgH);
-    const seedX = Math.max(1, Math.min(imgW - 2, px));
-    const seedY = Math.max(1, Math.min(imgH - 2, py));
-    filled = floodFill(imageData, seedX, seedY, color, alpha);
-    if (filled > 100) return filled;
+  // Score a point by checking how "clear" the area around it is.
+  // Higher score = more white/light pixels nearby = better seed point.
+  function clearnessScore(px: number, py: number, radius: number = 4): number {
+    let lightPixels = 0;
+    let total = 0;
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const x = px + dx, y = py + dy;
+        if (x < 0 || x >= imgW || y < 0 || y >= imgH) continue;
+        total++;
+        const i = (y * width + x) * 4;
+        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        if (brightness > 200) lightPixels++;  // clearly white/light
+      }
+    }
+    return total > 0 ? lightPixels / total : 0;
   }
 
-  return filled;
+  // Scan a grid of points within the bounding box
+  const gridSize = 6;
+  type Candidate = { x: number; y: number; score: number };
+  const candidates: Candidate[] = [];
+
+  for (let gy = 1; gy < gridSize; gy++) {
+    for (let gx = 1; gx < gridSize; gx++) {
+      const fx = gx / gridSize;
+      const fy = gy / gridSize;
+      const px = Math.round((box.x + box.width * fx) * imgW);
+      const py = Math.round((box.y + box.height * fy) * imgH);
+      const seedX = Math.max(2, Math.min(imgW - 3, px));
+      const seedY = Math.max(2, Math.min(imgH - 3, py));
+      const score = clearnessScore(seedX, seedY, 5);
+      if (score > 0.3) {  // at least 30% of neighborhood is light
+        candidates.push({ x: seedX, y: seedY, score });
+      }
+    }
+  }
+
+  // Sort by clearness — try the clearest spots first
+  candidates.sort((a, b) => b.score - a.score);
+
+  for (const seed of candidates) {
+    const filled = floodFill(imageData, seed.x, seed.y, color, alpha);
+    if (filled > 50) return filled;
+  }
+
+  // Last resort: try the exact center anyway
+  const cx = Math.round((box.x + box.width / 2) * imgW);
+  const cy = Math.round((box.y + box.height / 2) * imgH);
+  return floodFill(imageData, cx, cy, color, alpha);
 }
 
 // ── Component ───────────────────────────────────────────────────────────
