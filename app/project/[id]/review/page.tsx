@@ -20,6 +20,14 @@ export default function ReviewPage() {
   const [enhNotes,  setEnhNotes]  = useState<string[]>([]);
   const [showOriginal, setShowOriginal] = useState(false);
   const [showRendered, setShowRendered] = useState(false);
+  const [accentColor, setAccentColor] = useState<string>("graphite");
+
+  // Fetch firm accent color for the plan renderer palette
+  useEffect(() => {
+    fetch("/api/firm").then(r => r.json()).then(d => {
+      if (d.firm?.accentColor) setAccentColor(d.firm.accentColor);
+    }).catch(() => {});
+  }, []);
   const [strengths, setStrengths] = useState<string[]>([]);
   const [selectingFloor, setSelectingFloor] = useState(false);
   const [floorError,     setFloorError]     = useState<string | null>(null);
@@ -384,6 +392,7 @@ export default function ReviewPage() {
                   planImageUrl={project.planImageUrl}
                   rooms={analysis.rooms}
                   plotInfo={project.plotInfo}
+                  accentColor={accentColor}
                   height={480}
                   onRendered={async (blob) => {
                     // Upload the flood-filled PNG as the rendered plan
