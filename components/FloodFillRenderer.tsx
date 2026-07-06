@@ -72,96 +72,131 @@ function getRoomColor(name: string): { r: number; g: number; b: number; label: s
 }
 
 // ── Scanline flood fill ─────────────────────────────────────────────────
-// Fast queue-based scanline fill. Stops at dark pixels (walls) and
-// already-filled pixels. Max fill limit prevents runaway on open areas.
+// Stops at thick dark lines (walls) but passes through thin lines
+// (furniture, dimensions, annotations). Uses multiple seed points per
+// room to handle cases where the center lands on an obstacle.
 
 function floodFill(
   imageData: ImageData,
   startX: number,
   startY: number,
   fillColor: { r: number; g: number; b: number },
-  alpha: number,  // 0-255
-  wallThreshold: number = 120,  // pixels darker than this are "walls"
-  maxPixels: number = 500_000   // safety limit
+  alpha: number,
+  wallThreshold: number = 60,   // only very dark pixels are walls (lowered from 120)
+  maxPixels: number = 800_000
 ) {
   const { width, height, data } = imageData;
   const visited = new Uint8Array(width * height);
   const stack: number[] = [];
   let filled = 0;
 
-  const idx = (x: number, y: number) => y * width + x;
-
   function isWall(x: number, y: number): boolean {
     if (x < 0 || x >= width || y < 0 || y >= height) return true;
     const i = (y * width + x) * 4;
-    // Dark pixel = wall. Check brightness (R+G+B)/3
     const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-    return brightness < wallThreshold;
+    // Only consider pixels as walls if they're very dark AND the surrounding
+    // area is also dark (thick lines, not thin annotation lines)
+    if (brightness >= wallThreshold) return false;
+    // Check if this is a thick line (wall) by sampling neighbors
+    // Thin lines (1-2px) won't have dark neighbors in all directions
+    let darkNeighbors = 0;
+    for (const [dx, dy] of [[0, -2], [0, 2], [-2, 0], [2, 0]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+        const ni = (ny * width + nx) * 4;
+        if ((data[ni] + data[ni + 1] + data[ni + 2]) / 3 < wallThreshold) {
+          darkNeighbors++;
+        }
+      }
+    }
+    // Only treat as wall if at least 2 neighbors are also dark (thick line)
+    return darkNeighbors >= 2;
   }
 
   function isFillable(x: number, y: number): boolean {
     if (x < 0 || x >= width || y < 0 || y >= height) return false;
-    if (visited[idx(x, y)]) return false;
+    const idx = y * width + x;
+    if (visited[idx]) return false;
     return !isWall(x, y);
   }
 
   function fillPixel(x: number, y: number) {
     const i = (y * width + x) * 4;
-    // Alpha-blend the fill color over the existing pixel
     const a = alpha / 255;
     data[i]     = Math.round(data[i] * (1 - a) + fillColor.r * a);
     data[i + 1] = Math.round(data[i + 1] * (1 - a) + fillColor.g * a);
     data[i + 2] = Math.round(data[i + 2] * (1 - a) + fillColor.b * a);
-    visited[idx(x, y)] = 1;
+    visited[y * width + x] = 1;
     filled++;
   }
 
-  // Seed
-  if (!isFillable(startX, startY)) return;
+  if (!isFillable(startX, startY)) return filled;
   stack.push(startX, startY);
 
   while (stack.length > 0 && filled < maxPixels) {
     const sy = stack.pop()!;
     const sx = stack.pop()!;
-
     if (!isFillable(sx, sy)) continue;
 
-    // Scan left
     let lx = sx;
     while (lx > 0 && isFillable(lx - 1, sy)) lx--;
-
-    // Scan right
     let rx = sx;
     while (rx < width - 1 && isFillable(rx + 1, sy)) rx++;
 
-    // Fill the scanline
     let checkAbove = false;
     let checkBelow = false;
 
     for (let x = lx; x <= rx; x++) {
       fillPixel(x, sy);
 
-      // Check pixel above
       if (sy > 0 && isFillable(x, sy - 1)) {
-        if (!checkAbove) {
-          stack.push(x, sy - 1);
-          checkAbove = true;
-        }
-      } else {
-        checkAbove = false;
-      }
+        if (!checkAbove) { stack.push(x, sy - 1); checkAbove = true; }
+      } else { checkAbove = false; }
 
-      // Check pixel below
       if (sy < height - 1 && isFillable(x, sy + 1)) {
-        if (!checkBelow) {
-          stack.push(x, sy + 1);
-          checkBelow = true;
-        }
-      } else {
-        checkBelow = false;
-      }
+        if (!checkBelow) { stack.push(x, sy + 1); checkBelow = true; }
+      } else { checkBelow = false; }
     }
   }
+
+  return filled;
+}
+
+/**
+ * Try flood-filling from multiple seed points within a bounding box.
+ * The center might land on furniture or a label — try offset points too.
+ */
+function floodFillRoom(
+  imageData: ImageData,
+  box: { x: number; y: number; width: number; height: number },
+  imgW: number,
+  imgH: number,
+  color: { r: number; g: number; b: number },
+  alpha: number
+): number {
+  const cx = Math.round((box.x + box.width / 2) * imgW);
+  const cy = Math.round((box.y + box.height / 2) * imgH);
+
+  // Try center first
+  let filled = floodFill(imageData, cx, cy, color, alpha);
+  if (filled > 100) return filled;
+
+  // Center failed (landed on furniture/text) — try offset points
+  const offsets = [
+    [0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7],  // quadrants
+    [0.5, 0.3], [0.5, 0.7], [0.3, 0.5], [0.7, 0.5],  // midpoints
+  ];
+
+  for (const [fx, fy] of offsets) {
+    const px = Math.round((box.x + box.width * fx) * imgW);
+    const py = Math.round((box.y + box.height * fy) * imgH);
+    const seedX = Math.max(1, Math.min(imgW - 2, px));
+    const seedY = Math.max(1, Math.min(imgH - 2, py));
+    filled = floodFill(imageData, seedX, seedY, color, alpha);
+    if (filled > 100) return filled;
+  }
+
+  return filled;
 }
 
 // ── Component ───────────────────────────────────────────────────────────
@@ -204,21 +239,13 @@ export function FloodFillRenderer({ planImageUrl, rooms, plotInfo, onRendered, h
       // Get pixel data for flood filling
       const imageData = ctx.getImageData(0, 0, w, h);
 
-      // Flood fill each room from its center
+      // Flood fill each room from its bounding box center (with fallback seed points)
       const roomsWithBox = rooms.filter((r) => r.boundingBox);
       for (const room of roomsWithBox) {
         const box = room.boundingBox!;
         const color = getRoomColor(room.name);
-
-        // Center of the bounding box as the fill seed
-        const cx = Math.round((box.x + box.width / 2) * w);
-        const cy = Math.round((box.y + box.height / 2) * h);
-
-        // Clamp to image bounds
-        const seedX = Math.max(1, Math.min(w - 2, cx));
-        const seedY = Math.max(1, Math.min(h - 2, cy));
-
-        floodFill(imageData, seedX, seedY, color, 140); // alpha 140/255 ≈ 55% opacity
+        const filled = floodFillRoom(imageData, box, w, h, color, 130);
+        console.log(`[FloodFill] ${room.name}: ${filled} pixels filled`);
       }
 
       // Put the filled data back
