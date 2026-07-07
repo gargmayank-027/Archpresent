@@ -18,11 +18,13 @@ export default function HomePage() {
       fetch("/api/projects", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/firm").then((r) => r.json()),
     ]).then(([pd, fd]) => {
-      setProjects(pd.projects ?? []);
+      const projectList = pd.projects ?? [];
+      setProjects(projectList);
       const firmData = fd.firm ?? null;
       setFirm(firmData);
-      // Redirect to onboarding if no firm profile exists
-      if (!firmData) {
+      // Only redirect truly new users (no firm AND no projects).
+      // Returning users who lost firm data shouldn't be blocked from their projects.
+      if (!firmData && projectList.length === 0) {
         router.replace("/onboarding");
         return;
       }

@@ -284,15 +284,23 @@ export default function OnboardingPage() {
           )}
         </div>
 
-        {/* Skip link */}
-        {step === 3 && (
-          <p className="text-center mt-4">
-            <button type="button" onClick={handleComplete} disabled={saving}
+        {/* Skip — always visible */}
+        <div className="text-center mt-4 space-y-2">
+          {step === 3 && (
+            <p>
+              <button type="button" onClick={handleComplete} disabled={saving}
+                className="font-mono text-[10px] text-stone-400 hover:text-stone-600 uppercase tracking-widest transition-colors">
+                Skip contact details
+              </button>
+            </p>
+          )}
+          <p>
+            <a href="/dashboard"
               className="font-mono text-[10px] text-stone-400 hover:text-stone-600 uppercase tracking-widest transition-colors">
-              Skip for now
-            </button>
+              ← Go to dashboard
+            </a>
           </p>
-        )}
+        </div>
       </div>
     </div>
   );
