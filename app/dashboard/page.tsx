@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import type { Project, FirmProfile } from "@/types";
 import { ProjectCardMenu } from "@/components/ProjectCardMenu";
 
 export default function HomePage() {
-  const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [firm,     setFirm]     = useState<FirmProfile | null>(null);
   const [loading,  setLoading]  = useState(true);
@@ -18,19 +16,11 @@ export default function HomePage() {
       fetch("/api/projects", { cache: "no-store" }).then((r) => r.json()),
       fetch("/api/firm").then((r) => r.json()),
     ]).then(([pd, fd]) => {
-      const projectList = pd.projects ?? [];
-      setProjects(projectList);
-      const firmData = fd.firm ?? null;
-      setFirm(firmData);
-      // Only redirect truly new users (no firm AND no projects).
-      // Returning users who lost firm data shouldn't be blocked from their projects.
-      if (!firmData && projectList.length === 0) {
-        router.replace("/onboarding");
-        return;
-      }
+      setProjects(pd.projects ?? []);
+      setFirm(fd.firm ?? null);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, [router]);
+  }, []);
 
   const filtered = filter === "all"
     ? projects
@@ -65,26 +55,29 @@ export default function HomePage() {
             </Link>
           </div>
         ) : (
-          <div className="flex items-end justify-between gap-6 flex-wrap">
-            <div>
-              <p className="font-mono text-xs tracking-widest text-stone-400 uppercase mb-4">
-                Residential · Floor Plan Presentations
+          <div>
+            {/* Setup nudge banner */}
+            <div className="mb-6 border border-amber-200 bg-amber-50 rounded-sm px-4 py-3 flex items-center justify-between">
+              <p className="text-sm text-amber-800">
+                Set up your firm profile to brand your presentations with your logo and colors.
               </p>
-              <h1 className="font-display text-5xl md:text-6xl font-light text-stone-900 leading-tight mb-4"
-                  style={{ fontFamily: "'Cormorant Garamond', serif" }}>
-                From floor plan<br /><em>to client presentation</em>
-              </h1>
-              <p className="text-stone-500 text-base max-w-lg leading-relaxed">
-                Upload a floor plan, get AI-powered room analysis, interior moodboards,
-                and a polished PDF deck — in minutes.
-              </p>
+              <a href="/onboarding" className="font-mono text-[10px] uppercase tracking-widest text-amber-700 hover:text-amber-900 transition-colors flex-shrink-0 ml-4">
+                Set up →
+              </a>
             </div>
-            <div className="flex flex-col gap-3 self-end">
-              <Link href="/project/new" className="btn-primary">
+
+            <div className="flex items-end justify-between gap-6 flex-wrap">
+              <div>
+                <p className="font-mono text-xs tracking-widest text-stone-400 uppercase mb-4">
+                  Residential · Floor Plan Presentations
+                </p>
+                <h1 className="font-display text-5xl md:text-6xl font-light text-stone-900 leading-tight mb-4"
+                    style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                  Your Projects
+                </h1>
+              </div>
+              <Link href="/project/new" className="btn-primary self-end">
                 <span>+</span><span>New Project</span>
-              </Link>
-              <Link href="/settings" className="btn-secondary text-center justify-center">
-                Set up firm profile
               </Link>
             </div>
           </div>
