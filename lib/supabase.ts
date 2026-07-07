@@ -43,24 +43,35 @@ export async function supaUpload(
 ): Promise<string> {
   const supabase = getSupabase();
 
+  // Sanitize path — no leading slash, no double slashes
+  const cleanPath = path.replace(/^\/+/, "").replace(/\/\//g, "/");
+
   const ct = contentType
-    ?? (path.endsWith(".png") ? "image/png"
-      : path.endsWith(".jpg") || path.endsWith(".jpeg") ? "image/jpeg"
-      : path.endsWith(".pdf") ? "application/pdf"
-      : path.endsWith(".json") ? "application/json"
+    ?? (cleanPath.endsWith(".png") ? "image/png"
+      : cleanPath.endsWith(".jpg") || cleanPath.endsWith(".jpeg") ? "image/jpeg"
+      : cleanPath.endsWith(".pdf") ? "application/pdf"
+      : cleanPath.endsWith(".json") ? "application/json"
       : "application/octet-stream");
+
+  console.log(`[supabase] Uploading to bucket="${BUCKET}" path="${cleanPath}" size=${buffer.length} type=${ct}`);
+
+  // Convert Buffer to Uint8Array — Supabase client may not handle Node Buffer correctly
+  const body = new Uint8Array(buffer);
 
   const { error } = await supabase.storage
     .from(BUCKET)
-    .upload(path, buffer, {
+    .upload(cleanPath, body, {
       contentType: ct,
-      upsert: true,  // overwrite if exists
+      upsert: true,
     });
 
-  if (error) throw new Error(`Supabase upload failed: ${error.message}`);
+  if (error) {
+    console.error(`[supabase] Upload error:`, JSON.stringify(error));
+    throw new Error(`Supabase upload failed: ${error.message}`);
+  }
 
-  // Get public URL
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(cleanPath);
+  console.log(`[supabase] Upload success: ${data.publicUrl}`);
   return data.publicUrl;
 }
 
