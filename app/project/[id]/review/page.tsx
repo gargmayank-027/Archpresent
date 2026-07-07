@@ -20,6 +20,9 @@ export default function ReviewPage() {
   const [enhNotes,  setEnhNotes]  = useState<string[]>([]);
   const [showOriginal, setShowOriginal] = useState(false);
   const [showRendered, setShowRendered] = useState(false);
+  const [showAiRender, setShowAiRender] = useState(false);
+  const [aiRendering, setAiRendering]   = useState(false);
+  const [aiRenderError, setAiRenderError] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string>("graphite");
 
   // Fetch firm accent color for the plan renderer palette
@@ -28,6 +31,29 @@ export default function ReviewPage() {
       if (d.firm?.accentColor) setAccentColor(d.firm.accentColor);
     }).catch(() => {});
   }, []);
+
+  async function triggerAiRender() {
+    if (!project) return;
+    setAiRendering(true);
+    setAiRenderError(null);
+    try {
+      const res = await fetch("/api/ai-render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "AI rendering failed");
+      setProject(p => p ? { ...p, aiRenderedPlanUrl: data.aiRenderedPlanUrl } : p);
+      setShowAiRender(true);
+      setShowRendered(false);
+      setShowOriginal(false);
+    } catch (err) {
+      setAiRenderError(err instanceof Error ? err.message : "AI rendering failed");
+    } finally {
+      setAiRendering(false);
+    }
+  }
   const [strengths, setStrengths] = useState<string[]>([]);
   const [selectingFloor, setSelectingFloor] = useState(false);
   const [floorError,     setFloorError]     = useState<string | null>(null);
@@ -353,30 +379,46 @@ export default function ReviewPage() {
         {/* ── Left col: plan image + site context ─────────────────────── */}
         <div className="lg:col-span-3 space-y-5 fade-up fade-up-2">
 
-          {/* Plan image — with Original / Enhanced / Rendered toggle */}
+          {/* Plan image — with Original / Enhanced / Rendered / AI Render toggle */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <p className="font-mono text-xs tracking-widest text-stone-400 uppercase">Floor Plan</p>
               <div className="flex items-center gap-0 border border-stone-200 rounded-sm overflow-hidden">
+                {(project.aiRenderedPlanUrl || (analysis?.rooms?.length && process.env.NEXT_PUBLIC_HAS_REPLICATE)) && (
+                  <button type="button"
+                    onClick={() => {
+                      if (project.aiRenderedPlanUrl) {
+                        setShowAiRender(true); setShowRendered(false); setShowOriginal(false);
+                      } else {
+                        triggerAiRender();
+                      }
+                    }}
+                    disabled={aiRendering}
+                    className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest transition-colors ${
+                      showAiRender ? "bg-stone-900 text-white" : "text-stone-400 hover:text-stone-700"
+                    }`}>
+                    {aiRendering ? "Generating…" : "AI Render"}
+                  </button>
+                )}
                 {analysis?.rooms?.some(r => r.boundingBox) && (
                   <button type="button"
-                    onClick={() => { setShowOriginal(false); setShowRendered(true); }}
+                    onClick={() => { setShowAiRender(false); setShowOriginal(false); setShowRendered(true); }}
                     className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest transition-colors ${
                       showRendered ? "bg-stone-900 text-white" : "text-stone-400 hover:text-stone-700"
                     }`}>
-                    Rendered
+                    Color-coded
                   </button>
                 )}
                 <button type="button"
-                  onClick={() => { setShowOriginal(false); setShowRendered(false); }}
+                  onClick={() => { setShowAiRender(false); setShowOriginal(false); setShowRendered(false); }}
                   className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest transition-colors ${
-                    !showOriginal && !showRendered ? "bg-stone-900 text-white" : "text-stone-400 hover:text-stone-700"
+                    !showOriginal && !showRendered && !showAiRender ? "bg-stone-900 text-white" : "text-stone-400 hover:text-stone-700"
                   }`}>
                   {project.originalPlanImageUrl && project.originalPlanImageUrl !== project.planImageUrl ? "Enhanced" : "Plan"}
                 </button>
                 {project.originalPlanImageUrl && project.originalPlanImageUrl !== project.planImageUrl && (
                   <button type="button"
-                    onClick={() => { setShowOriginal(true); setShowRendered(false); }}
+                    onClick={() => { setShowAiRender(false); setShowOriginal(true); setShowRendered(false); }}
                     className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest transition-colors ${
                       showOriginal ? "bg-stone-900 text-white" : "text-stone-400 hover:text-stone-700"
                     }`}>
@@ -387,7 +429,19 @@ export default function ReviewPage() {
             </div>
 
             <div className="card p-4 bg-white relative overflow-hidden">
-              {showRendered && analysis?.rooms ? (
+              {showAiRender && project.aiRenderedPlanUrl ? (
+                <img
+                  src={project.aiRenderedPlanUrl}
+                  alt="AI-rendered floor plan"
+                  className="w-full object-contain max-h-[480px] rounded-sm"
+                />
+              ) : showAiRender && aiRendering ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <span className="spinner w-6 h-6 text-stone-400" />
+                  <p className="font-mono text-[10px] text-stone-400 uppercase tracking-widest">Generating AI render…</p>
+                  <p className="text-[11px] text-stone-400">This takes 15–30 seconds</p>
+                </div>
+              ) : showRendered && analysis?.rooms ? (
                 <FloodFillRenderer
                   planImageUrl={project.planImageUrl}
                   rooms={analysis.rooms}
@@ -395,7 +449,6 @@ export default function ReviewPage() {
                   accentColor={accentColor}
                   height={480}
                   onRendered={async (blob) => {
-                    // Upload the flood-filled PNG as the rendered plan
                     try {
                       const fd = new FormData();
                       fd.append("projectId", project.id);
@@ -405,7 +458,7 @@ export default function ReviewPage() {
                         const data = await res.json();
                         setProject((p) => p ? { ...p, renderedPlanUrl: data.renderedPlanUrl } : p);
                       }
-                    } catch { /* non-fatal — the canvas display is already showing the result */ }
+                    } catch { /* non-fatal */ }
                   }}
                 />
               ) : (
@@ -420,6 +473,15 @@ export default function ReviewPage() {
                   style={{ imageRendering: "crisp-edges" }}
                 />
               )}
+
+              {/* Badges */}
+              {showAiRender && project.aiRenderedPlanUrl && (
+                <div className="absolute top-3 right-3 z-10">
+                  <span className="bg-violet-100 border border-violet-300 text-violet-700 font-mono text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-sm">
+                    AI Rendered
+                  </span>
+                </div>
+              )}
               {showRendered && (
                 <div className="absolute top-3 right-3 z-10">
                   <span className="bg-emerald-100 border border-emerald-300 text-emerald-700 font-mono text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-sm">
@@ -427,7 +489,7 @@ export default function ReviewPage() {
                   </span>
                 </div>
               )}
-              {!showOriginal && !showRendered && project.originalPlanImageUrl && project.originalPlanImageUrl !== project.planImageUrl && (
+              {!showOriginal && !showRendered && !showAiRender && project.originalPlanImageUrl && project.originalPlanImageUrl !== project.planImageUrl && (
                 <div className="absolute top-3 right-3">
                   <span className="bg-amber-100 border border-amber-300 text-amber-700 font-mono text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-sm">
                     Enhanced
@@ -435,6 +497,21 @@ export default function ReviewPage() {
                 </div>
               )}
             </div>
+
+            {/* AI Render button — shown below the plan when not already rendered */}
+            {analysis?.rooms?.length && !project.aiRenderedPlanUrl && !showAiRender && (
+              <button type="button" onClick={triggerAiRender} disabled={aiRendering}
+                className="w-full mt-2 btn-secondary flex items-center justify-center gap-2 py-2.5">
+                {aiRendering ? (
+                  <><span className="spinner w-3 h-3" style={{borderWidth: 1}} /> Generating AI render…</>
+                ) : (
+                  <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg> Generate AI Rendered Plan</>
+                )}
+              </button>
+            )}
+            {aiRenderError && (
+              <p className="text-xs text-red-500 mt-1">{aiRenderError}</p>
+            )}
 
             <div className="flex items-center justify-between mt-2">
               <p className="font-mono text-[10px] text-stone-400">{project.planImageUrl.split("/").pop()}</p>

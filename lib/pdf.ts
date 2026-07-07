@@ -444,10 +444,10 @@ async function addPlanSlide(
   });
 
   // Plan image — left 70% of slide
-  // Use the color-coded rendered plan if available, otherwise the original B&W
+  // Priority: AI render > color-coded render > original plan
   const planW = W * 0.68;
   const planH = H - 80;
-  const planSource = project.renderedPlanUrl ?? project.planImagePath;
+  const planSource = project.aiRenderedPlanUrl ?? project.renderedPlanUrl ?? project.planImagePath;
 
   try {
     const imgBytes = await loadImageBytes(planSource);

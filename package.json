@@ -15,6 +15,7 @@
     "react-dom": "^18",
     "pdf-lib": "^1.17.1",
     "@vercel/blob": "^0.23.4",
+    "@supabase/supabase-js": "^2.45.0",
     "pdfjs-dist": "^4.6.82",
     "next-auth": "^4.24.7",
     "bcryptjs": "^2.4.3"
