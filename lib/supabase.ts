@@ -86,11 +86,15 @@ export async function supaDelete(paths: string[]): Promise<void> {
 /**
  * List files in a folder.
  */
-export async function supaList(folder: string): Promise<string[]> {
+export async function supaList(folder?: string): Promise<string[]> {
   const supabase = getSupabase();
-  const { data, error } = await supabase.storage.from(BUCKET).list(folder);
+  const { data, error } = await supabase.storage.from(BUCKET).list(folder || undefined, {
+    limit: 1000,
+  });
   if (error) throw new Error(`Supabase list failed: ${error.message}`);
-  return (data ?? []).map((f) => `${folder}/${f.name}`);
+  return (data ?? [])
+    .filter((f) => f.name && !f.name.startsWith("."))
+    .map((f) => folder ? `${folder}/${f.name}` : f.name);
 }
 
 /**

@@ -92,7 +92,7 @@ async function getSupa() {
   return await import("@/lib/supabase");
 }
 
-const supaProjectKey = (id: string) => `data/project-${id}.json`;
+const supaProjectKey = (id: string) => `project-${id}.json`;
 
 async function supa_projectCreate(project: Project): Promise<Project> {
   const { supaUpload } = await getSupa();
@@ -121,8 +121,8 @@ async function supa_projectUpdate(id: string, patch: Partial<Project>): Promise<
 async function supa_projectList(): Promise<Project[]> {
   try {
     const { supaList, supaDownload } = await getSupa();
-    const files = await supaList("data");
-    const projectFiles = files.filter((f) => f.includes("project-") && f.endsWith(".json"));
+    const files = await supaList("");
+    const projectFiles = files.filter((f) => f.startsWith("project-") && f.endsWith(".json"));
 
     const projects = await Promise.all(
       projectFiles.map(async (path) => {
@@ -151,7 +151,7 @@ async function supa_projectDelete(id: string): Promise<void> {
 async function supa_firmGet(): Promise<FirmProfile | null> {
   try {
     const { supaDownload } = await getSupa();
-    const buf = await supaDownload("data/firm.json");
+    const buf = await supaDownload("firm.json");
     return JSON.parse(buf.toString()) as FirmProfile;
   } catch {
     return null;
@@ -160,7 +160,7 @@ async function supa_firmGet(): Promise<FirmProfile | null> {
 
 async function supa_firmSet(profile: FirmProfile): Promise<FirmProfile> {
   const { supaUpload } = await getSupa();
-  await supaUpload(Buffer.from(JSON.stringify(profile)), "data/firm.json", "application/json");
+  await supaUpload(Buffer.from(JSON.stringify(profile)), "firm.json", "application/json");
   return profile;
 }
 
@@ -233,7 +233,7 @@ async function blob_projectDelete(id: string): Promise<void> {
 async function blob_firmGet(): Promise<FirmProfile | null> {
   try {
     const { list } = await getBlob();
-    const { blobs } = await list({ prefix: "data/firm.json" });
+    const { blobs } = await list({ prefix: "firm.json" });
     if (!blobs.length) return null;
     return readBlobJson<FirmProfile>(blobs[0].url);
   } catch { return null; }
@@ -241,7 +241,7 @@ async function blob_firmGet(): Promise<FirmProfile | null> {
 
 async function blob_firmSet(profile: FirmProfile): Promise<FirmProfile> {
   const { put } = await getBlob();
-  await put("data/firm.json", JSON.stringify(profile), { access: "public", contentType: "application/json", addRandomSuffix: false });
+  await put("firm.json", JSON.stringify(profile), { access: "public", contentType: "application/json", addRandomSuffix: false });
   return profile;
 }
 
