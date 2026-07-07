@@ -19,13 +19,16 @@ import type { Project, PlotInfo, PlotFacing, PropertyType, FloorLocation, PlanPa
 
 export const runtime = "nodejs";
 
-/** Get the current user's ID from the session, or null if not authenticated */
-async function getUserId(): Promise<string | null> {
+/** Get the current user's identifiers for project matching */
+async function getUserIdentifiers(): Promise<{ id: string | null; email: string | null }> {
   try {
     const session = await getServerSession(authOptions);
-    return (session?.user as any)?.id ?? session?.user?.email ?? null;
+    return {
+      id: (session?.user as any)?.id ?? null,
+      email: session?.user?.email ?? null,
+    };
   } catch {
-    return null;
+    return { id: null, email: null };
   }
 }
 
@@ -151,13 +154,13 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Create project ──────────────────────────────────────────────────────
-    const userId = await getUserId();
+    const { id: userId, email: userEmail } = await getUserIdentifiers();
     const presTypeRaw = formData.get("presentationType");
     const presentationType = presTypeRaw === "concept" || presTypeRaw === "interior" ? presTypeRaw : undefined;
 
     const project: Project = {
       id,
-      userId: userId ?? undefined,
+      userId: userId ?? userEmail ?? undefined,
       presentationType,
       name,
       clientName,
@@ -180,15 +183,25 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   try {
-    const userId = await getUserId();
+    const { id: userId, email } = await getUserIdentifiers();
     const allProjects = await projectStore.list();
 
-    // Only return projects owned by this user.
-    // Projects without a userId (created before auth was added) are hidden
-    // from all authenticated users — they're legacy/orphaned data.
-    const projects = userId
-      ? allProjects.filter((p) => p.userId === userId)
-      : allProjects;
+    let projects;
+    if (userId || email) {
+      // Show projects that match by userId, email, OR have no owner (unclaimed).
+      // This handles:
+      //  - Normal case: userId matches
+      //  - Session changed: email still matches even if userId differs
+      //  - Pre-auth projects: no userId field → shown to the current user
+      projects = allProjects.filter((p) =>
+        !p.userId ||                         // unclaimed (pre-auth)
+        p.userId === userId ||               // exact userId match
+        p.userId === email ||                // userId stored as email
+        (email && p.userId === email)         // cross-match
+      );
+    } else {
+      projects = allProjects;
+    }
 
     return NextResponse.json({ projects }, {
       headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" },
