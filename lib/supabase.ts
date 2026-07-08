@@ -1,37 +1,23 @@
 /**
- * lib/supabase.ts — Supabase client for storage
+ * lib/supabase.ts — Supabase Storage via direct REST API
  *
- * Uses Supabase Storage (1GB free) for file uploads and JSON data.
- * Replaces Vercel Blob which was suspended due to free tier limits.
+ * Uses fetch() directly to the Storage API endpoint instead of the
+ * supabase-js client, which was routing requests to PostgREST (PGRST125).
  *
  * Setup:
- *   1. Create a Supabase project at supabase.com
- *   2. Go to Storage → Create bucket "archpresent" → set to PUBLIC
- *   3. Add env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+ *   1. Create bucket "archpresent" in Supabase → Storage (set to PUBLIC)
+ *   2. Add RLS policy: allow all operations for all users
+ *   3. Set env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  */
 
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-
-let _client: SupabaseClient | null = null;
-
-export function getSupabase(): SupabaseClient {
-  if (_client) return _client;
-
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !key) {
-    throw new Error(
-      "Supabase not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in env vars. " +
-      "Create a free project at supabase.com."
-    );
-  }
-
-  _client = createClient(url, key);
-  return _client;
-}
-
 const BUCKET = "archpresent";
+
+function getConfig() {
+  const url = process.env.SUPABASE_URL?.replace(/\/+$/, "");
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
+  return { url, key };
+}
 
 /**
  * Upload a file to Supabase Storage. Overwrites if exists.
@@ -41,9 +27,7 @@ export async function supaUpload(
   path: string,
   contentType?: string
 ): Promise<string> {
-  const supabase = getSupabase();
-
-  // Sanitize path — no leading slash, no double slashes
+  const { url, key } = getConfig();
   const cleanPath = path.replace(/^\/+/, "").replace(/\/\//g, "/");
 
   const ct = contentType
@@ -53,66 +37,114 @@ export async function supaUpload(
       : cleanPath.endsWith(".json") ? "application/json"
       : "application/octet-stream");
 
-  console.log(`[supabase] Uploading to bucket="${BUCKET}" path="${cleanPath}" size=${buffer.length} type=${ct}`);
+  console.log(`[supabase] Upload: bucket=${BUCKET} path=${cleanPath} size=${buffer.length}`);
 
-  // Convert Buffer to Uint8Array — Supabase client may not handle Node Buffer correctly
-  const body = new Uint8Array(buffer);
+  // Use upsert endpoint (POST with x-upsert header)
+  const res = await fetch(
+    `${url}/storage/v1/object/${BUCKET}/${cleanPath}`,
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "apikey": key,
+        "Content-Type": ct,
+        "x-upsert": "true",
+      },
+      body: buffer,
+    }
+  );
 
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(cleanPath, body, {
-      contentType: ct,
-      upsert: true,
-    });
-
-  if (error) {
-    console.error(`[supabase] Upload error:`, JSON.stringify(error));
-    throw new Error(`Supabase upload failed: ${error.message}`);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error(`[supabase] Upload failed (${res.status}): ${errText}`);
+    throw new Error(`Supabase upload failed (${res.status}): ${errText.slice(0, 200)}`);
   }
 
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(cleanPath);
-  console.log(`[supabase] Upload success: ${data.publicUrl}`);
-  return data.publicUrl;
+  // Public URL
+  const publicUrl = `${url}/storage/v1/object/public/${BUCKET}/${cleanPath}`;
+  console.log(`[supabase] OK: ${publicUrl.slice(0, 80)}…`);
+  return publicUrl;
 }
 
 /**
  * Download a file from Supabase Storage.
  */
 export async function supaDownload(path: string): Promise<Buffer> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase.storage.from(BUCKET).download(path);
-  if (error || !data) throw new Error(`Supabase download failed: ${error?.message ?? "no data"}`);
-  return Buffer.from(await data.arrayBuffer());
+  const { url, key } = getConfig();
+  const cleanPath = path.replace(/^\/+/, "");
+
+  const res = await fetch(
+    `${url}/storage/v1/object/${BUCKET}/${cleanPath}`,
+    {
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "apikey": key,
+      },
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(`Supabase download failed (${res.status})`);
+  }
+
+  return Buffer.from(await res.arrayBuffer());
 }
 
 /**
- * Delete a file from Supabase Storage.
+ * Delete files from Supabase Storage.
  */
 export async function supaDelete(paths: string[]): Promise<void> {
-  const supabase = getSupabase();
-  const { error } = await supabase.storage.from(BUCKET).remove(paths);
-  if (error) throw new Error(`Supabase delete failed: ${error.message}`);
+  const { url, key } = getConfig();
+
+  await fetch(
+    `${url}/storage/v1/object/${BUCKET}`,
+    {
+      method: "DELETE",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "apikey": key,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ prefixes: paths }),
+    }
+  );
 }
 
 /**
- * List files in a folder.
+ * List files in Supabase Storage.
  */
 export async function supaList(folder?: string): Promise<string[]> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase.storage.from(BUCKET).list(folder || undefined, {
-    limit: 1000,
-  });
-  if (error) throw new Error(`Supabase list failed: ${error.message}`);
+  const { url, key } = getConfig();
+
+  const res = await fetch(
+    `${url}/storage/v1/object/list/${BUCKET}`,
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "apikey": key,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prefix: folder || "",
+        limit: 1000,
+        offset: 0,
+      }),
+    }
+  );
+
+  if (!res.ok) return [];
+
+  const data = await res.json();
   return (data ?? [])
-    .filter((f) => f.name && !f.name.startsWith("."))
-    .map((f) => folder ? `${folder}/${f.name}` : f.name);
+    .filter((f: any) => f.name && !f.name.startsWith("."))
+    .map((f: any) => folder ? `${folder}/${f.name}` : f.name);
 }
 
 /**
- * Get the public URL for a file (without downloading).
+ * Get public URL for a file.
  */
 export function supaPublicUrl(path: string): string {
-  const supabase = getSupabase();
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  const { url } = getConfig();
+  return `${url}/storage/v1/object/public/${BUCKET}/${path}`;
 }
