@@ -1,23 +1,13 @@
 "use client";
 
 /**
- * components/FloodFillRenderer.tsx
+ * components/FloodFillRenderer.tsx — v5
  *
- * v4 — Nearest-room coloring (replaces flood fill entirely)
- *
- * For every light pixel in the plan image, find the closest room center
- * and tint it with that room's color. Dark pixels (walls, linework) stay
- * untouched.
- *
- * Why this is better than flood fill:
- *  - No seed points to find (the #1 failure mode of flood fill)
- *  - No wall threshold tuning
- *  - No leaking through doorways
- *  - Colors EVERY room, even tiny bathrooms full of fixtures
- *  - Runs in a single pass over the image
- *
- * The boundaries between rooms follow Voronoi edges (equidistant from
- * two room centers) which closely match where walls typically are.
+ * Wall-masked Voronoi coloring:
+ *  1. Assign each pixel a room color based on nearest room center
+ *  2. BUT skip dark pixels (walls) — they keep their original appearance
+ *  3. AND only color within the plan boundary (excludes title block, margins)
+ *  4. Smooth edge treatment: fade alpha near walls for clean transitions
  */
 
 import { useRef, useState, useEffect, useCallback } from "react";
@@ -85,7 +75,7 @@ function classifyRoom(name: string): RoomType {
   if (n.includes("kitchen") || n.includes("kit") || n.includes("serv")) return "kitchen";
   if (n.includes("dining") || n.includes("dinning")) return "dining";
   if (n.includes("toilet") || n.includes("bath") || n.includes("wc") || n.includes("c.toilet")) return "bathroom";
-  if (n.includes("dress") || n.includes("wardrobe") || n.includes("w.i.w") || n.includes("w.i.c") || n.includes("closet")) return "dressing";
+  if (n.includes("dress") || n.includes("wardrobe") || n.includes("w.i.") || n.includes("closet")) return "dressing";
   if (n.includes("pooja") || n.includes("puja") || n.includes("prayer")) return "pooja";
   if (n.includes("balcon") || n.includes("terrace") || n.includes("porch") || n.includes("garden") || n.includes("green") || n.includes("lawn") || n.includes("deck") || n.includes("front open")) return "outdoor";
   if (n.includes("lobby") || n.includes("foyer") || n.includes("entry") || n.includes("stair") || n.includes("passage") || n.includes("lift") || n.includes("corridor")) return "lobby";
@@ -94,58 +84,75 @@ function classifyRoom(name: string): RoomType {
   return "default";
 }
 
-// ── Nearest-room coloring ─────────────────────────────────────────────
-// Single-pass: for each pixel, find closest room center, apply color.
+// ── Wall-masked Voronoi coloring ────────────────────────────────────────
 
-function nearestRoomColor(
+function applyRoomColors(
   imageData: ImageData,
-  rooms: { cx: number; cy: number; color: { r: number; g: number; b: number } }[],
-  wallBrightness: number = 100,  // pixels darker than this are walls — left untouched
-  alpha: number = 0.30           // tint strength (0-1)
+  rooms: { cx: number; cy: number; color: { r: number; g: number; b: number }; name: string }[],
+  planBounds: { x1: number; y1: number; x2: number; y2: number }
 ) {
   const { width, height, data } = imageData;
+  const BLOCK = 2; // process in 2x2 blocks for speed
+  const WALL_DARK = 90;  // pixels darker than this are walls
+  const ALPHA = 0.32;    // tint strength
 
-  // Pre-compute room center squared distances for each pixel would be
-  // too slow for large images. Instead, downsample: assign each 4x4 block
-  // to the nearest room, then paint all pixels in the block.
-  const blockSize = 3;
+  // Pre-build a "wall proximity" map: for each pixel, how close is the nearest wall?
+  // This lets us fade the color near walls for smooth transitions.
+  // (simplified: just check immediate neighborhood instead of full distance map)
 
-  for (let by = 0; by < height; by += blockSize) {
-    for (let bx = 0; bx < width; bx += blockSize) {
-      // Find nearest room to this block's center
-      const mx = bx + blockSize / 2;
-      const my = by + blockSize / 2;
+  for (let by = 0; by < height; by += BLOCK) {
+    for (let bx = 0; bx < width; bx += BLOCK) {
+      // Skip pixels outside the plan boundary (title block, margins)
+      if (bx < planBounds.x1 || bx > planBounds.x2 || by < planBounds.y1 || by > planBounds.y2) continue;
 
+      // Check center pixel of block
+      const ci = (by * width + bx) * 4;
+      const brightness = (data[ci] + data[ci + 1] + data[ci + 2]) / 3;
+
+      // Skip wall pixels — keep them as-is
+      if (brightness < WALL_DARK) continue;
+
+      // Skip already-colored pixels (hatching, fills in the original)
+      const sat = Math.max(data[ci], data[ci+1], data[ci+2]) - Math.min(data[ci], data[ci+1], data[ci+2]);
+      if (sat > 50) continue;
+
+      // Check if near a wall (within 3px) — reduce alpha for smooth edge
+      let nearWall = false;
+      for (const [dx, dy] of [[-3,0],[3,0],[0,-3],[0,3]] as const) {
+        const nx = bx + dx, ny = by + dy;
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          const ni = (ny * width + nx) * 4;
+          if ((data[ni] + data[ni+1] + data[ni+2]) / 3 < WALL_DARK) {
+            nearWall = true;
+            break;
+          }
+        }
+      }
+
+      const alpha = nearWall ? ALPHA * 0.5 : ALPHA;
+
+      // Find nearest room
       let minDist = Infinity;
       let bestColor = rooms[0]?.color;
 
       for (const room of rooms) {
-        const dx = mx - room.cx;
-        const dy = my - room.cy;
+        const dx = bx - room.cx;
+        const dy = by - room.cy;
         const d = dx * dx + dy * dy;
-        if (d < minDist) {
-          minDist = d;
-          bestColor = room.color;
-        }
+        if (d < minDist) { minDist = d; bestColor = room.color; }
       }
 
       if (!bestColor) continue;
 
       // Apply to all pixels in the block
-      for (let py = by; py < Math.min(by + blockSize, height); py++) {
-        for (let px = bx; px < Math.min(bx + blockSize, width); px++) {
+      for (let py = by; py < Math.min(by + BLOCK, height); py++) {
+        for (let px = bx; px < Math.min(bx + BLOCK, width); px++) {
           const i = (py * width + px) * 4;
-          const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+          const b = (data[i] + data[i + 1] + data[i + 2]) / 3;
+          if (b < WALL_DARK) continue; // per-pixel wall check
+          const s = Math.max(data[i], data[i+1], data[i+2]) - Math.min(data[i], data[i+1], data[i+2]);
+          if (s > 50) continue;
 
-          // Skip dark pixels (walls, linework)
-          if (brightness < wallBrightness) continue;
-
-          // Skip pixels that are already strongly colored (hatching, fills)
-          // Only tint white/light grey areas
-          const saturation = Math.max(data[i], data[i+1], data[i+2]) - Math.min(data[i], data[i+1], data[i+2]);
-          if (saturation > 60) continue;
-
-          // Alpha-blend the room color
           data[i]     = Math.round(data[i] * (1 - alpha) + bestColor.r * alpha);
           data[i + 1] = Math.round(data[i + 1] * (1 - alpha) + bestColor.g * alpha);
           data[i + 2] = Math.round(data[i + 2] * (1 - alpha) + bestColor.b * alpha);
@@ -153,6 +160,30 @@ function nearestRoomColor(
       }
     }
   }
+}
+
+// Detect plan boundary — the bounding box of all room centers, padded
+function detectPlanBounds(
+  rooms: { cx: number; cy: number }[],
+  imgW: number, imgH: number,
+  padding: number = 60
+): { x1: number; y1: number; x2: number; y2: number } {
+  if (rooms.length === 0) return { x1: 0, y1: 0, x2: imgW, y2: imgH };
+
+  let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
+  for (const r of rooms) {
+    minX = Math.min(minX, r.cx);
+    minY = Math.min(minY, r.cy);
+    maxX = Math.max(maxX, r.cx);
+    maxY = Math.max(maxY, r.cy);
+  }
+
+  return {
+    x1: Math.max(0, minX - padding),
+    y1: Math.max(0, minY - padding),
+    x2: Math.min(imgW - 1, maxX + padding),
+    y2: Math.min(imgH - 1, maxY + padding),
+  };
 }
 
 // ── Component ───────────────────────────────────────────────────────────
@@ -167,59 +198,54 @@ export function FloodFillRenderer({ planImageUrl, rooms, plotInfo, accentColor, 
   const render = useCallback(async () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    setRendering(true);
-    setError(null);
+    setRendering(true); setError(null);
 
     try {
       const img = new Image();
       img.crossOrigin = "anonymous";
       await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = () => rej(new Error("Image load failed")); img.src = planImageUrl; });
 
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
+      const w = img.naturalWidth, h = img.naturalHeight;
       const legendH = 50;
 
-      canvas.width = w;
-      canvas.height = h + legendH;
+      canvas.width = w; canvas.height = h + legendH;
       const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = "#fff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0);
 
-      // Build room center list
+      // Build room data
       const roomsWithBox = rooms.filter((r) => r.boundingBox);
       const roomCenters = roomsWithBox.map((room) => {
         const box = room.boundingBox!;
-        const type = classifyRoom(room.name);
         return {
           cx: Math.round((box.x + box.width / 2) * w),
           cy: Math.round((box.y + box.height / 2) * h),
-          color: palette[type],
+          color: palette[classifyRoom(room.name)],
           name: room.name,
-          type,
+          type: classifyRoom(room.name),
         };
       });
 
-      // Apply nearest-room coloring
+      // Detect plan boundary to exclude title block
+      const planBounds = detectPlanBounds(roomCenters, w, h, Math.round(w * 0.08));
+
+      // Apply wall-masked Voronoi coloring
       const imageData = ctx.getImageData(0, 0, w, h);
-      nearestRoomColor(imageData, roomCenters, 100, 0.35);
+      applyRoomColors(imageData, roomCenters, planBounds);
       ctx.putImageData(imageData, 0, 0);
 
-      // Draw subtle room boundaries (thin dashed lines between adjacent different-colored areas)
-      // Not needed — the wall linework does this naturally
-
-      // Labels
+      // Draw room labels
       for (const room of roomCenters) {
         const box = roomsWithBox.find(r => r.name === room.name)!.boundingBox!;
-        const boxPxW = box.width * w;
-        const boxPxH = box.height * h;
+        const boxW = box.width * w, boxH = box.height * h;
 
         const displayName = room.name.length > 14
           ? room.name.replace(/Room/gi, "Rm").replace(/Dressing/gi, "Dress").replace(/Common /gi, "C.").trim()
           : room.name;
-        const sizeText = roomsWithBox.find(r => r.name === room.name)?.sizeEstimateSqm
-          ? `${roomsWithBox.find(r => r.name === room.name)!.sizeEstimateSqm} m\u00B2` : "";
-        const fontSize = Math.max(7, Math.min(12, Math.round(Math.min(boxPxW, boxPxH) * 0.07)));
+        const sqm = roomsWithBox.find(r => r.name === room.name)?.sizeEstimateSqm;
+        const sizeText = sqm ? `${sqm} m\u00B2` : "";
+        const fontSize = Math.max(7, Math.min(12, Math.round(Math.min(boxW, boxH) * 0.07)));
 
         ctx.font = `bold ${fontSize}px Helvetica, Arial, sans-serif`;
         const nw = ctx.measureText(displayName).width;
@@ -228,24 +254,20 @@ export function FloodFillRenderer({ planImageUrl, rooms, plotInfo, accentColor, 
 
         const pillW = Math.max(nw, sw) + 12;
         const pillH = sizeText ? fontSize * 2 + 8 : fontSize + 6;
-        const pillX = room.cx - pillW / 2;
-        const pillY = room.cy - pillH / 2;
+        const px = room.cx - pillW / 2, py = room.cy - pillH / 2;
 
-        // Pill background
+        // Pill
         ctx.fillStyle = "rgba(255,255,255,0.88)";
-        ctx.beginPath(); ctx.roundRect(pillX, pillY, pillW, pillH, 3); ctx.fill();
-        ctx.strokeStyle = `rgba(${Math.round(room.color.r*0.5)},${Math.round(room.color.g*0.5)},${Math.round(room.color.b*0.5)},0.4)`;
+        ctx.beginPath(); ctx.roundRect(px, py, pillW, pillH, 3); ctx.fill();
+        const c = room.color;
+        ctx.strokeStyle = `rgba(${c.r*0.5|0},${c.g*0.5|0},${c.b*0.5|0},0.35)`;
         ctx.lineWidth = 0.5; ctx.stroke();
 
-        // Name
-        ctx.fillStyle = "#1a1917";
+        ctx.fillStyle = "#1a1917"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.font = `bold ${fontSize}px Helvetica, Arial, sans-serif`;
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
         ctx.fillText(displayName, room.cx, room.cy - (sizeText ? 3 : 0));
-
         if (sizeText) {
-          ctx.fillStyle = "#6B7280";
-          ctx.font = `${fontSize - 1}px Helvetica, Arial, sans-serif`;
+          ctx.fillStyle = "#6B7280"; ctx.font = `${fontSize-1}px Helvetica, Arial, sans-serif`;
           ctx.fillText(sizeText, room.cx, room.cy + fontSize - 1);
         }
       }
@@ -262,17 +284,17 @@ export function FloodFillRenderer({ planImageUrl, rooms, plotInfo, accentColor, 
         bathroom:"Bath", dressing:"Dressing", pooja:"Pooja", outdoor:"Outdoor",
         lobby:"Lobby", study:"Study", utility:"Utility", default:"Other",
       };
-      for (const rc of roomCenters) { if (!usedTypes.has(rc.type)) usedTypes.set(rc.type, labels[rc.type]); }
+      for (const rc of roomCenters) if (!usedTypes.has(rc.type)) usedTypes.set(rc.type, labels[rc.type]);
 
       const items = Array.from(usedTypes.entries());
       const totalLW = items.length * 82;
       const startX = Math.max(12, (w - totalLW) / 2);
       items.forEach(([type, label], i) => {
         const ix = startX + i * 82;
-        const c = palette[type];
-        ctx.fillStyle = `rgb(${c.r},${c.g},${c.b})`;
+        const cl = palette[type];
+        ctx.fillStyle = `rgb(${cl.r},${cl.g},${cl.b})`;
         ctx.beginPath(); ctx.roundRect(ix, legendY + 16, 12, 12, 2); ctx.fill();
-        ctx.strokeStyle = `rgb(${Math.round(c.r*0.6)},${Math.round(c.g*0.6)},${Math.round(c.b*0.6)})`;
+        ctx.strokeStyle = `rgb(${cl.r*0.6|0},${cl.g*0.6|0},${cl.b*0.6|0})`;
         ctx.lineWidth = 1; ctx.stroke();
         ctx.fillStyle = "#374151"; ctx.font = "500 9px Helvetica, Arial, sans-serif";
         ctx.textAlign = "left"; ctx.textBaseline = "middle";
@@ -282,8 +304,8 @@ export function FloodFillRenderer({ planImageUrl, rooms, plotInfo, accentColor, 
       // Compass
       if (plotInfo?.facing) {
         const cx = w - 45, cy = 45, r = 20;
-        const facingDeg: Record<string,number> = {north:0,"north-east":45,east:90,"south-east":135,south:180,"south-west":225,west:270,"north-west":315};
-        const rot = (facingDeg[(plotInfo.facing).toLowerCase()] ?? 0) * Math.PI / 180;
+        const fd: Record<string,number> = {north:0,"north-east":45,east:90,"south-east":135,south:180,"south-west":225,west:270,"north-west":315};
+        const rot = (fd[plotInfo.facing.toLowerCase()] ?? 0) * Math.PI / 180;
         ctx.fillStyle = "rgba(255,255,255,0.93)";
         ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = "#D1D5DB"; ctx.lineWidth = 1; ctx.stroke();
@@ -296,8 +318,8 @@ export function FloodFillRenderer({ planImageUrl, rooms, plotInfo, accentColor, 
 
       canvas.toBlob((blob) => { if (blob && onRendered) onRendered(blob); setRendering(false); }, "image/png");
     } catch (err) {
-      console.error("Rendering failed:", err);
-      setError(err instanceof Error ? err.message : "Rendering failed");
+      console.error("Render failed:", err);
+      setError(err instanceof Error ? err.message : "Failed");
       setRendering(false);
     }
   }, [planImageUrl, rooms, plotInfo, palette, onRendered]);
@@ -312,13 +334,13 @@ export function FloodFillRenderer({ planImageUrl, rooms, plotInfo, accentColor, 
         <div className="absolute inset-0 flex items-center justify-center bg-white/80 rounded-sm">
           <div className="flex items-center gap-2">
             <span className="spinner w-4 h-4 text-stone-400" />
-            <span className="font-mono text-[10px] text-stone-400 uppercase tracking-widest">Rendering plan...</span>
+            <span className="font-mono text-[10px] text-stone-400 uppercase tracking-widest">Rendering…</span>
           </div>
         </div>
       )}
       {error && (
         <div className="border border-stone-200 rounded-sm p-8 text-center bg-stone-50">
-          <p className="text-sm text-stone-400">Could not render color-coded plan</p>
+          <p className="text-sm text-stone-400">Rendering failed</p>
         </div>
       )}
     </div>
