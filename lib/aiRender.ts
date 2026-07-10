@@ -94,28 +94,23 @@ async function renderWithHuggingFace(
 ): Promise<string> {
   const token = process.env.HF_API_TOKEN!;
 
-  // Models to try in order — some may be cold/unavailable
+  // Models with active free inference — ordered by quality
   const models = [
-    "lllyasviel/sd-controlnet-canny",
-    "stabilityai/stable-diffusion-xl-refiner-1.0",
+    "stabilityai/stable-diffusion-xl-base-1.0",
     "runwayml/stable-diffusion-v1-5",
+    "CompVis/stable-diffusion-v1-4",
   ];
 
   for (const model of models) {
     try {
       console.log(`[aiRender] HF model: ${model}`);
-      const url = await callHfModel(model, planBuffer, prompt, token);
+      const url = await callHfImgToImg(model, planBuffer, prompt, token);
       if (url) return url;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("503") || msg.includes("loading")) {
-        console.log(`[aiRender] ${model} is loading, trying next…`);
-        continue;
-      }
-      if (msg.includes("429")) {
-        console.log(`[aiRender] ${model} rate limited, trying next…`);
-        continue;
-      }
+      console.warn(`[aiRender] ${model}: ${msg}`);
+      if (msg.includes("503") || msg.includes("loading") || msg.includes("fetch")) continue;
+      if (msg.includes("429")) continue;
       throw err;
     }
   }
@@ -123,89 +118,57 @@ async function renderWithHuggingFace(
   throw new Error("All HF models unavailable — try again in a few minutes");
 }
 
-async function callHfModel(
+async function callHfImgToImg(
   model: string,
   imageBuffer: Buffer,
   prompt: string,
   token: string
 ): Promise<string> {
-  const isControlNet = model.includes("controlnet");
+  // Use the image-to-image endpoint
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
 
-  if (isControlNet) {
-    // ControlNet models use JSON input with base64 image
-    const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        inputs: prompt,
-        parameters: {
-          image: `data:image/png;base64,${imageBuffer.toString("base64")}`,
-          negative_prompt: NEG,
-          num_inference_steps: 25,
-          guidance_scale: 8,
+  try {
+    const response = await fetch(
+      `https://api-inference.huggingface.co/models/${model}`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "x-wait-for-model": "true",
         },
-      }),
-    });
+        body: JSON.stringify({
+          inputs: prompt,
+          parameters: {
+            negative_prompt: NEG,
+            guidance_scale: 8,
+            num_inference_steps: 25,
+          },
+        }),
+        signal: controller.signal,
+      }
+    );
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
       throw new Error(`HF ${response.status}: ${errText.slice(0, 200)}`);
     }
 
-    // Response is the image directly
-    const resultBuffer = Buffer.from(await response.arrayBuffer());
-    return bufferToDataUrl(resultBuffer);
-  }
-
-  // img2img models — send image as multipart
-  const formData = new FormData();
-  const blob = new Blob([imageBuffer], { type: "image/png" });
-  formData.append("inputs", blob, "plan.png");
-
-  // For img2img, we pass the prompt as a parameter
-  const params = new URLSearchParams({
-    prompt: prompt,
-    negative_prompt: NEG,
-    strength: "0.65",  // how much to change from original (0=identical, 1=completely new)
-    guidance_scale: "8.0",
-    num_inference_steps: "25",
-  });
-
-  const response = await fetch(
-    `https://api-inference.huggingface.co/models/${model}?${params.toString()}`,
-    {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${token}` },
-      body: imageBuffer,
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("json")) {
+      const json = await response.json();
+      if (json.error) throw new Error(`HF: ${json.error}`);
+      throw new Error("503: Model loading");
     }
-  );
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    throw new Error(`HF ${response.status}: ${errText.slice(0, 200)}`);
+    const resultBuffer = Buffer.from(await response.arrayBuffer());
+    if (resultBuffer.length < 1000) throw new Error("HF returned empty image");
+
+    return `data:image/png;base64,${resultBuffer.toString("base64")}`;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  // Check if response is JSON (error/loading) or binary (image)
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("json")) {
-    const json = await response.json();
-    if (json.error) throw new Error(`HF: ${json.error}`);
-    if (json.estimated_time) throw new Error(`503: Model loading (ETA: ${json.estimated_time}s)`);
-    throw new Error("HF: unexpected JSON response");
-  }
-
-  const resultBuffer = Buffer.from(await response.arrayBuffer());
-  if (resultBuffer.length < 1000) throw new Error("HF returned empty/tiny image");
-
-  return bufferToDataUrl(resultBuffer);
-}
-
-function bufferToDataUrl(buffer: Buffer): string {
-  // We return a data URL temporarily — the caller will download and save it
-  return `data:image/png;base64,${buffer.toString("base64")}`;
 }
 
 // ── Replicate (paid fallback) ───────────────────────────────────────────
@@ -216,6 +179,7 @@ async function renderWithReplicate(
 ): Promise<string> {
   const token = process.env.REPLICATE_API_TOKEN!;
 
+  // Use model name instead of version hash — Replicate resolves to latest
   const response = await fetch("https://api.replicate.com/v1/predictions", {
     method: "POST",
     headers: {
@@ -224,14 +188,16 @@ async function renderWithReplicate(
       "Prefer": "wait",
     },
     body: JSON.stringify({
-      version: "2220025c1bfed10fa2e608a03d74bde1bbacc586d60f98b76e08ece3af3f97ab",
+      model: "jagilley/controlnet-canny",
       input: {
         image: planImageUrl,
         prompt: prompt,
         negative_prompt: NEG,
         num_inference_steps: 30,
         guidance_scale: 8.5,
-        controlnet_conditioning_scale: 0.75,
+        a_prompt: "best quality, highly detailed, photorealistic",
+        ddim_steps: 30,
+        scale: 9,
         seed: Math.floor(Math.random() * 1000000),
       },
     }),
