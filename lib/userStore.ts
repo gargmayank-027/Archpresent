@@ -1,12 +1,8 @@
 /**
  * lib/userStore.ts
  *
- * Lightweight user storage for email/password authentication.
- * Uses the same JSON-file pattern as projectStore for local dev,
- * and Vercel Blob for production.
- *
- * Users are stored with bcrypt-hashed passwords. OAuth users (Google/Apple)
- * don't need entries here — they're handled entirely by NextAuth.
+ * User storage for email/password auth.
+ * Uses Supabase Storage (same as projects/firm), local filesystem for dev.
  */
 
 import bcrypt from "bcryptjs";
@@ -19,68 +15,53 @@ export interface StoredUser {
   createdAt: string;
 }
 
-const IS_VERCEL = !!process.env.VERCEL;
+const USE_SUPABASE = !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SALT_ROUNDS = 10;
 
-// ── In-memory cache (local dev) ──────────────────────────────────────────
+// ── Load / save users ───────────────────────────────────────────────────
 
-let usersCache: StoredUser[] | null = null;
+async function loadUsers(): Promise<StoredUser[]> {
+  if (USE_SUPABASE) {
+    try {
+      const { supaDownload } = await import("@/lib/supabase");
+      const buf = await supaDownload("users.json");
+      return JSON.parse(buf.toString()) as StoredUser[];
+    } catch {
+      return [];
+    }
+  }
 
-function getUsersPath(): string {
-  const { join } = require("path") as typeof import("path");
-  return join(process.cwd(), "public", "uploads", "users.json");
-}
-
-function loadUsers(): StoredUser[] {
-  if (usersCache) return usersCache;
+  // Local dev
   try {
     const { readFileSync, existsSync } = require("fs") as typeof import("fs");
-    const p = getUsersPath();
+    const { join } = require("path") as typeof import("path");
+    const p = join(process.cwd(), "public", "uploads", "users.json");
     if (!existsSync(p)) return [];
-    usersCache = JSON.parse(readFileSync(p, "utf-8"));
-    return usersCache!;
+    return JSON.parse(readFileSync(p, "utf-8"));
   } catch {
     return [];
   }
 }
 
-function saveUsers(users: StoredUser[]) {
+async function saveUsers(users: StoredUser[]): Promise<void> {
+  if (USE_SUPABASE) {
+    const { supaUpload } = await import("@/lib/supabase");
+    await supaUpload(Buffer.from(JSON.stringify(users, null, 2)), "users.json", "application/json");
+    return;
+  }
+
+  // Local dev
   const { writeFileSync, mkdirSync, existsSync } = require("fs") as typeof import("fs");
-  const { dirname } = require("path") as typeof import("path");
-  const p = getUsersPath();
-  const dir = dirname(p);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const { join, dirname } = require("path") as typeof import("path");
+  const p = join(process.cwd(), "public", "uploads", "users.json");
+  if (!existsSync(dirname(p))) mkdirSync(dirname(p), { recursive: true });
   writeFileSync(p, JSON.stringify(users, null, 2));
-  usersCache = users;
-}
-
-// ── Vercel Blob storage ──────────────────────────────────────────────────
-
-async function blobLoadUsers(): Promise<StoredUser[]> {
-  try {
-    const { list, head } = await import("@vercel/blob");
-    const { blobs } = await list({ prefix: "users.json" });
-    if (blobs.length === 0) return [];
-    const res = await fetch(blobs[0].url);
-    return await res.json();
-  } catch {
-    return [];
-  }
-}
-
-async function blobSaveUsers(users: StoredUser[]): Promise<void> {
-  const { put } = await import("@vercel/blob");
-  await put("users.json", JSON.stringify(users), {
-    access: "public",
-    addRandomSuffix: false,
-    contentType: "application/json",
-  });
 }
 
 // ── Public API ───────────────────────────────────────────────────────────
 
 export async function findUserByEmail(email: string): Promise<StoredUser | null> {
-  const users = IS_VERCEL ? await blobLoadUsers() : loadUsers();
+  const users = await loadUsers();
   return users.find((u) => u.email.toLowerCase() === email.toLowerCase()) ?? null;
 }
 
@@ -97,9 +78,9 @@ export async function createUser(name: string, email: string, password: string):
     createdAt: new Date().toISOString(),
   };
 
-  const users = IS_VERCEL ? await blobLoadUsers() : loadUsers();
+  const users = await loadUsers();
   users.push(user);
-  IS_VERCEL ? await blobSaveUsers(users) : saveUsers(users);
+  await saveUsers(users);
 
   return user;
 }
