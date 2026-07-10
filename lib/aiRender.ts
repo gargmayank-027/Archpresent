@@ -61,23 +61,36 @@ export async function generateAiRenderedPlan(
   if (!imgRes.ok) throw new Error(`Failed to fetch plan image: ${imgRes.status}`);
   const planBuffer = Buffer.from(await imgRes.arrayBuffer());
 
+  const errors: string[] = [];
+
   // Try free tier first, then paid
   if (process.env.HF_API_TOKEN) {
-    try {
-      console.log("[aiRender] Trying Hugging Face (free tier)…");
-      return await renderWithHuggingFace(planBuffer, prompt);
-    } catch (err) {
-      console.warn("[aiRender] HF failed, trying next:", err instanceof Error ? err.message : err);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`[aiRender] Trying Hugging Face (attempt ${attempt})…`);
+        return await renderWithHuggingFace(planBuffer, prompt);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`HF attempt ${attempt}: ${msg}`);
+        console.warn(`[aiRender] HF attempt ${attempt} failed:`, msg);
+        if (attempt < 2) await new Promise(r => setTimeout(r, 3000)); // wait 3s before retry
+      }
     }
   }
 
   if (process.env.REPLICATE_API_TOKEN) {
     try {
-      console.log("[aiRender] Trying Replicate (paid)…");
+      console.log("[aiRender] Trying Replicate…");
       return await renderWithReplicate(planImageUrl, prompt);
     } catch (err) {
-      console.warn("[aiRender] Replicate failed:", err instanceof Error ? err.message : err);
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Replicate: ${msg}`);
+      console.warn("[aiRender] Replicate failed:", msg);
     }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`AI rendering failed after all attempts: ${errors.join(" | ")}`);
   }
 
   throw new Error(
@@ -94,11 +107,9 @@ async function renderWithHuggingFace(
 ): Promise<string> {
   const token = process.env.HF_API_TOKEN!;
 
-  // Models with active free inference — ordered by quality
   const models = [
     "stabilityai/stable-diffusion-xl-base-1.0",
     "runwayml/stable-diffusion-v1-5",
-    "CompVis/stable-diffusion-v1-4",
   ];
 
   for (const model of models) {
@@ -107,48 +118,47 @@ async function renderWithHuggingFace(
       const url = await callHfImgToImg(model, planBuffer, prompt, token);
       if (url) return url;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? `${err.message} [${err.cause ?? ""}]` : String(err);
       console.warn(`[aiRender] ${model}: ${msg}`);
-      if (msg.includes("503") || msg.includes("loading") || msg.includes("fetch")) continue;
-      if (msg.includes("429")) continue;
-      throw err;
+      continue;
     }
   }
 
-  throw new Error("All HF models unavailable — try again in a few minutes");
+  throw new Error("All HF models unavailable");
 }
 
 async function callHfImgToImg(
   model: string,
-  imageBuffer: Buffer,
+  _imageBuffer: Buffer,
   prompt: string,
   token: string
 ): Promise<string> {
-  // Use the image-to-image endpoint
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
+  const timeout = setTimeout(() => controller.abort(), 60000);
 
   try {
-    const response = await fetch(
-      `https://api-inference.huggingface.co/models/${model}`,
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "x-wait-for-model": "true",
+    const apiUrl = `https://api-inference.huggingface.co/models/${model}`;
+    console.log(`[aiRender] Fetching: ${apiUrl}`);
+
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "x-wait-for-model": "true",
+      },
+      body: JSON.stringify({
+        inputs: prompt,
+        parameters: {
+          negative_prompt: NEG,
+          guidance_scale: 8,
+          num_inference_steps: 25,
         },
-        body: JSON.stringify({
-          inputs: prompt,
-          parameters: {
-            negative_prompt: NEG,
-            guidance_scale: 8,
-            num_inference_steps: 25,
-          },
-        }),
-        signal: controller.signal,
-      }
-    );
+      }),
+      signal: controller.signal,
+    });
+
+    console.log(`[aiRender] HF response: ${response.status} ${response.headers.get("content-type")}`);
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "");
@@ -166,6 +176,12 @@ async function callHfImgToImg(
     if (resultBuffer.length < 1000) throw new Error("HF returned empty image");
 
     return `data:image/png;base64,${resultBuffer.toString("base64")}`;
+  } catch (err) {
+    // Add details about why fetch failed
+    if (err instanceof TypeError && (err as any).cause) {
+      throw new Error(`fetch failed: ${String((err as any).cause)}`);
+    }
+    throw err;
   } finally {
     clearTimeout(timeout);
   }
@@ -179,8 +195,9 @@ async function renderWithReplicate(
 ): Promise<string> {
   const token = process.env.REPLICATE_API_TOKEN!;
 
-  // Use model name instead of version hash — Replicate resolves to latest
-  const response = await fetch("https://api.replicate.com/v1/predictions", {
+  // Use the model-specific predictions endpoint — auto-resolves to latest version
+  // No hardcoded version hash needed
+  const response = await fetch("https://api.replicate.com/v1/models/jagilley/controlnet-canny/predictions", {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${token}`,
@@ -188,17 +205,16 @@ async function renderWithReplicate(
       "Prefer": "wait",
     },
     body: JSON.stringify({
-      model: "jagilley/controlnet-canny",
       input: {
         image: planImageUrl,
         prompt: prompt,
-        negative_prompt: NEG,
-        num_inference_steps: 30,
-        guidance_scale: 8.5,
-        a_prompt: "best quality, highly detailed, photorealistic",
+        a_prompt: "best quality, highly detailed, photorealistic, professional real estate render",
+        n_prompt: NEG,
         ddim_steps: 30,
         scale: 9,
         seed: Math.floor(Math.random() * 1000000),
+        eta: 0,
+        image_resolution: 768,
       },
     }),
   });
