@@ -90,6 +90,8 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
 
   if (project.presentationType === "concept") {
     // ── CONCEPT PRESENTATION ──────────────────────────────────────────
+    console.log(`[pdf] Building concept deck: ${project.name}`);
+    console.log(`[pdf] Plan: ${(project.aiRenderedPlanUrl ?? project.renderedPlanUrl ?? project.planImagePath ?? "none").slice(0, 80)}`);
     // First-meeting deck: spatial storytelling, no moodboards
     await addCoverSlide(doc, project, firm, accent, reg, bold, italic, logoBytes, logoIsPng);
 
@@ -166,9 +168,15 @@ export async function rasterizePdfToPageImages(
   pdfBuffer: Buffer,
   density = 130
 ): Promise<Buffer[]> {
+  // Sharp cannot render PDFs on Vercel (no PDF codec in the serverless build).
+  // This always fails, so return empty immediately to skip the attempt and
+  // let the frontend use the JSX fallback preview.
+  if (process.env.VERCEL) {
+    return [];
+  }
+
   try {
     const sharp = (await import("sharp")).default;
-
     const probe = (sharp as unknown as (input: Buffer, opts: object) => import("sharp").Sharp)(
       pdfBuffer, { density }
     );
@@ -184,9 +192,7 @@ export async function rasterizePdfToPageImages(
     }
     return images;
   } catch (err) {
-    // Sharp can't handle PDFs in this environment (expected on Vercel) —
-    // return empty array so the caller falls back to the JSX preview.
-    console.warn("[pdf] Export preview rasterisation unavailable:", String(err));
+    console.warn("[pdf] Rasterisation unavailable:", String(err));
     return [];
   }
 }
