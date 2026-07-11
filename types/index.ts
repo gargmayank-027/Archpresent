@@ -65,6 +65,7 @@ export interface Project {
   shareEnabled?:   boolean;  // false = link disabled even if token exists
   shareExpiresAt?: string;   // ISO string, undefined = never expires
   shareViewCount?: number;   // how many times the link was opened
+  shareLastViewedAt?: string; // ISO timestamp of last view
 }
 
 export interface RoomSummary {

@@ -27,9 +27,10 @@ export async function GET(
     if (project.shareExpiresAt && new Date(project.shareExpiresAt) < new Date())
       return NextResponse.json({ error: "This link has expired. Please contact your architect for an updated link." }, { status: 410 });
 
-    // Increment view count (non-blocking)
+    // Track view count + last viewed timestamp (non-blocking)
     projectStore.update(project.id, {
       shareViewCount: (project.shareViewCount ?? 0) + 1,
+      shareLastViewedAt: new Date().toISOString(),
     }).catch(() => {});
 
     // Strip internal server paths before sending to client

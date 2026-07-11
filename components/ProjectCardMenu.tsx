@@ -26,6 +26,7 @@ export function ProjectCardMenu({ project, onDeleted }: ProjectCardMenuProps) {
   const [deleting,    setDeleting]    = useState(false);
   const [sharing,     setSharing]     = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Close menu on outside click
@@ -173,6 +174,36 @@ export function ProjectCardMenu({ project, onDeleted }: ProjectCardMenuProps) {
                 )}
                 <span className="text-xs text-stone-700">
                   {shareCopied ? "Link copied!" : sharing ? "Generating…" : "Share"}
+                </span>
+              </button>
+
+              {/* Duplicate */}
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.preventDefault(); e.stopPropagation();
+                  setDuplicating(true);
+                  try {
+                    const res = await fetch("/api/projects/duplicate", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ projectId: project.id }),
+                    });
+                    if (res.ok) window.location.reload();
+                  } catch {} finally { setDuplicating(false); }
+                }}
+                disabled={duplicating}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-stone-50 transition-colors disabled:opacity-50"
+              >
+                {duplicating ? (
+                  <span className="spinner w-3.5 h-3.5" style={{ borderWidth: 1.5 }} />
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                  </svg>
+                )}
+                <span className="text-xs text-stone-700">
+                  {duplicating ? "Duplicating…" : "Duplicate"}
                 </span>
               </button>
 
