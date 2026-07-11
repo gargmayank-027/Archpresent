@@ -77,7 +77,7 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
   const logoPath = firm?.logoDiskPath ?? firm?.logoUrl;
   if (logoPath) {
     try {
-      const ext = logoPath.split(".").pop()?.toLowerCase() ?? "";
+      const ext = logoPath.split("?")[0].split(".").pop()?.toLowerCase() ?? "";
       if (["png","jpg","jpeg","webp"].includes(ext)) {
         const buf = await loadImageBytes(logoPath);
         if (buf) {
@@ -452,8 +452,8 @@ async function addPlanSlide(
   try {
     const imgBytes = await loadImageBytes(planSource);
     if (!imgBytes) throw new Error("Could not load plan image");
-    const ext      = planSource.split(".").pop()?.toLowerCase();
-    const pdfImg   = ext === "png" ? await doc.embedPng(imgBytes) : await doc.embedJpg(imgBytes);
+    // Try PNG first (most common for our plans), fall back to JPEG
+    const pdfImg = await doc.embedPng(imgBytes).catch(() => doc.embedJpg(imgBytes));
     const dims     = pdfImg.scaleToFit(planW - M * 2, planH - 20);
     const ix       = M + (planW - M * 2 - dims.width) / 2;
     const iy       = (planH - dims.height) / 2 + 20;
@@ -463,8 +463,7 @@ async function addPlanSlide(
     try {
       const imgBytes = await loadImageBytes(project.planImagePath);
       if (!imgBytes) throw new Error("fallback also failed");
-      const ext    = project.planImagePath.split(".").pop()?.toLowerCase();
-      const pdfImg = ext === "png" ? await doc.embedPng(imgBytes) : await doc.embedJpg(imgBytes);
+      const pdfImg = await doc.embedPng(imgBytes).catch(() => doc.embedJpg(imgBytes));
       const dims   = pdfImg.scaleToFit(planW - M * 2, planH - 20);
       const ix     = M + (planW - M * 2 - dims.width) / 2;
       const iy     = (planH - dims.height) / 2 + 20;
@@ -932,22 +931,34 @@ async function embedImageSafe(doc: PDFDocument, buf: Buffer) {
 
 async function loadImageBytes(pathOrUrl: string): Promise<Buffer | null> {
   try {
+    let buf: Buffer | null = null;
+
     if (pathOrUrl.startsWith("http")) {
-      return await fetchRemoteImage(pathOrUrl);
+      buf = await fetchRemoteImage(pathOrUrl);
+    } else if (fs.existsSync(pathOrUrl)) {
+      buf = fs.readFileSync(pathOrUrl);
+    } else {
+      const publicPath = require("path").join(process.cwd(), "public", pathOrUrl);
+      if (fs.existsSync(publicPath)) buf = fs.readFileSync(publicPath);
     }
-    // Local disk
-    if (fs.existsSync(pathOrUrl)) {
-      return fs.readFileSync(pathOrUrl);
+
+    if (!buf) {
+      console.warn("[pdf] Image not found:", pathOrUrl.slice(0, 80));
+      return null;
     }
-    // Try as relative to public/
-    const publicPath = require("path").join(process.cwd(), "public", pathOrUrl);
-    if (fs.existsSync(publicPath)) {
-      return fs.readFileSync(publicPath);
+
+    // Validate it's actually an image (not an HTML error page from Supabase/CDN)
+    const isPng = buf[0] === 0x89 && buf[1] === 0x50; // PNG magic: 0x89 P
+    const isJpg = buf[0] === 0xFF && buf[1] === 0xD8; // JPEG magic: 0xFF 0xD8
+    if (!isPng && !isJpg) {
+      const preview = buf.slice(0, 50).toString("utf-8").replace(/\n/g, " ");
+      console.warn(`[pdf] Not a valid image (${buf.length} bytes, starts with: "${preview}"):`, pathOrUrl.slice(0, 80));
+      return null;
     }
-    console.warn("[pdf] Image not found:", pathOrUrl);
-    return null;
+
+    return buf;
   } catch (err) {
-    console.warn("[pdf] Failed to load image:", pathOrUrl, err);
+    console.warn("[pdf] Failed to load image:", pathOrUrl.slice(0, 80), err);
     return null;
   }
 }
