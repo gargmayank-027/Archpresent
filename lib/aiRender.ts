@@ -63,8 +63,8 @@ export async function generateAiRenderedPlan(
 
   const errors: string[] = [];
 
-  // Try free tier first, then paid
-  if (process.env.HF_API_TOKEN) {
+  // HF is DNS-blocked from Vercel — skip entirely in production
+  if (process.env.HF_API_TOKEN && !process.env.VERCEL) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         console.log(`[aiRender] Trying Hugging Face (attempt ${attempt})…`);
@@ -73,7 +73,7 @@ export async function generateAiRenderedPlan(
         const msg = err instanceof Error ? err.message : String(err);
         errors.push(`HF attempt ${attempt}: ${msg}`);
         console.warn(`[aiRender] HF attempt ${attempt} failed:`, msg);
-        if (attempt < 2) await new Promise(r => setTimeout(r, 3000)); // wait 3s before retry
+        if (attempt < 2) await new Promise(r => setTimeout(r, 3000));
       }
     }
   }
@@ -90,11 +90,12 @@ export async function generateAiRenderedPlan(
   }
 
   if (errors.length > 0) {
-    throw new Error(`AI rendering failed after all attempts: ${errors.join(" | ")}`);
+    throw new Error(`AI rendering failed: ${errors.join(" | ")}`);
   }
 
   throw new Error(
-    "No AI rendering service configured. Add HF_API_TOKEN (free) or REPLICATE_API_TOKEN to your environment variables."
+    "No AI rendering service configured. Add REPLICATE_API_TOKEN to your Vercel environment variables. " +
+    "Get one free at replicate.com/account/api-tokens"
   );
 }
 
@@ -195,46 +196,84 @@ async function renderWithReplicate(
 ): Promise<string> {
   const token = process.env.REPLICATE_API_TOKEN!;
 
-  // Use the model-specific predictions endpoint — auto-resolves to latest version
-  // No hardcoded version hash needed
-  const response = await fetch("https://api.replicate.com/v1/models/jagilley/controlnet-canny/predictions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "Prefer": "wait",
-    },
-    body: JSON.stringify({
-      input: {
-        image: planImageUrl,
-        prompt: prompt,
-        a_prompt: "best quality, highly detailed, photorealistic, professional real estate render",
-        n_prompt: NEG,
-        ddim_steps: 30,
-        scale: 9,
-        seed: Math.floor(Math.random() * 1000000),
-        eta: 0,
-        image_resolution: 768,
-      },
-    }),
-  });
+  // Models to try — some may be removed/renamed over time
+  const models = [
+    "andreasjansson/controlnet-canny",
+    "jagilley/controlnet-canny", 
+    "lucataco/sdxl-controlnet",
+  ];
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    throw new Error(`Replicate ${response.status}: ${errText.slice(0, 200)}`);
+  for (const model of models) {
+    try {
+      console.log(`[aiRender] Replicate model: ${model}`);
+      
+      // Step 1: Look up the model to get the latest version
+      const modelRes = await fetch(`https://api.replicate.com/v1/models/${model}`, {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      
+      if (!modelRes.ok) {
+        console.log(`[aiRender] Model ${model} not found (${modelRes.status}), trying next…`);
+        continue;
+      }
+      
+      const modelData = await modelRes.json();
+      const version = modelData.latest_version?.id;
+      
+      if (!version) {
+        console.log(`[aiRender] No version for ${model}, trying next…`);
+        continue;
+      }
+      
+      console.log(`[aiRender] Using version: ${version.slice(0, 12)}…`);
+
+      // Step 2: Create prediction with the discovered version
+      const response = await fetch("https://api.replicate.com/v1/predictions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Prefer": "wait",
+        },
+        body: JSON.stringify({
+          version,
+          input: {
+            image: planImageUrl,
+            prompt: prompt,
+            a_prompt: "best quality, highly detailed, photorealistic, professional real estate render",
+            n_prompt: NEG,
+            ddim_steps: 30,
+            scale: 9,
+            seed: Math.floor(Math.random() * 1000000),
+            eta: 0,
+            image_resolution: 768,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        console.warn(`[aiRender] Replicate prediction failed (${response.status}): ${errText.slice(0, 150)}`);
+        continue;
+      }
+
+      const prediction = await response.json();
+
+      if (prediction.output) {
+        const url = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
+        if (url) return url;
+      }
+
+      if (prediction.id) {
+        return await pollReplicate(prediction.id, token);
+      }
+    } catch (err) {
+      console.warn(`[aiRender] ${model} error:`, err instanceof Error ? err.message : err);
+      continue;
+    }
   }
 
-  const prediction = await response.json();
-
-  if (prediction.output) {
-    return Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
-  }
-
-  if (prediction.id) {
-    return pollReplicate(prediction.id, token);
-  }
-
-  throw new Error(`Replicate failed: ${prediction.error ?? "unknown"}`);
+  throw new Error("All Replicate models failed");
 }
 
 async function pollReplicate(id: string, token: string): Promise<string> {

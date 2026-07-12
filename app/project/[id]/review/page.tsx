@@ -498,7 +498,7 @@ export default function ReviewPage() {
               )}
             </div>
 
-            {/* AI Render button — shown below the plan when not already rendered */}
+            {/* AI Render button — shown below the plan */}
             {analysis?.rooms?.length && !project.aiRenderedPlanUrl && !showAiRender && (
               <button type="button" onClick={triggerAiRender} disabled={aiRendering}
                 className="w-full mt-2 btn-secondary flex items-center justify-center gap-2 py-2.5">

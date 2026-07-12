@@ -115,6 +115,11 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
       await addSpatialHighlightsSlide(doc, project, accent, reg, bold, italic);
     }
 
+    // Vastu compliance check (if facing info is available)
+    if (project.plotInfo?.facing && project.analysis?.rooms?.length) {
+      await addVastuSlide(doc, project, accent, reg, bold, italic);
+    }
+
   } else {
     // ── INTERIOR PRESENTATION ─────────────────────────────────────────
     // Design-phase deck: moodboards for every room
@@ -307,6 +312,30 @@ async function addCoverSlide(
   // Firm tagline — lower right, clear of the global footer band
   if (firm?.tagline) {
     page.drawText(firm.tagline, { x: rx, y: M + FOOTER_H + 14, size: 10, font, color: C.muted });
+  }
+
+  // QR code — bottom right corner, links to the shared presentation
+  if (project.shareToken && project.shareEnabled !== false) {
+    try {
+      const { generateQrMatrix, drawQrOnPage } = await import("@/lib/qr");
+      const shareUrl = `${process.env.APP_URL ?? "https://archpresent.vercel.app"}/share/${project.shareToken}`;
+      const qrMatrix = generateQrMatrix(shareUrl);
+      const qrSize = 2.2; // module size in points
+      const qrTotal = qrMatrix.length * qrSize;
+      const qrX = W - M - qrTotal - 4;
+      const qrY = M + FOOTER_H + 8;
+
+      drawQrOnPage(page, qrMatrix, qrX, qrY, qrSize, accent, C.bg);
+
+      // "Scan to view" label
+      page.drawText("SCAN TO VIEW", {
+        x: qrX + qrTotal / 2 - font.widthOfTextAtSize("SCAN TO VIEW", 5) / 2,
+        y: qrY - 8,
+        size: 5, font, color: C.muted,
+      });
+    } catch (err) {
+      console.warn("[pdf] QR code generation failed (non-fatal):", err);
+    }
   }
 }
 
@@ -1373,5 +1402,141 @@ async function addSpatialHighlightsSlide(
         thickness: 0.3, color: rgb(0.2, 0.2, 0.2),
       });
     }
+  });
+}
+
+// ─── Concept: Vastu Compliance slide ──────────────────────────────────────────
+
+async function addVastuSlide(
+  doc: PDFDocument,
+  project: Project,
+  accent: RGB,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont
+) {
+  const rooms = project.analysis?.rooms ?? [];
+  const facing = (project.plotInfo?.facing ?? "").toLowerCase();
+  if (!facing || rooms.length === 0) return;
+
+  const page = doc.addPage([W, H]);
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
+  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+
+  page.drawText("VASTU ANALYSIS", {
+    x: M, y: H - M - 4, size: 9, font: bold, color: accent,
+  });
+
+  page.drawText("How this plan aligns with Vastu Shastra principles.", {
+    x: M, y: H - M - 22, size: 10, font: italic, color: C.muted,
+  });
+
+  // Vastu rules for room placement
+  const vastuRules: { room: string; ideal: string; direction: string; match: (orient: string) => boolean }[] = [
+    { room: "Master Bedroom", ideal: "South-West", direction: "sw",
+      match: (o) => o.includes("south") || o.includes("west") },
+    { room: "Kitchen", ideal: "South-East", direction: "se",
+      match: (o) => o.includes("south") || o.includes("east") },
+    { room: "Pooja Room", ideal: "North-East", direction: "ne",
+      match: (o) => o.includes("north") || o.includes("east") },
+    { room: "Living Room", ideal: "North or East", direction: "ne",
+      match: (o) => o.includes("north") || o.includes("east") },
+    { room: "Dining", ideal: "West", direction: "w",
+      match: (o) => o.includes("west") },
+    { room: "Bathroom", ideal: "North-West", direction: "nw",
+      match: (o) => o.includes("north") || o.includes("west") },
+    { room: "Entrance", ideal: "East or North", direction: "ne",
+      match: (o) => o.includes("east") || o.includes("north") },
+    { room: "Staircase", ideal: "South-West", direction: "sw",
+      match: (o) => o.includes("south") || o.includes("west") },
+  ];
+
+  const results: { rule: string; ideal: string; actual: string; pass: boolean; note: string }[] = [];
+
+  for (const rule of vastuRules) {
+    // Find matching room in the analysis
+    const matchedRoom = rooms.find(r => {
+      const n = r.name.toLowerCase();
+      const rn = rule.room.toLowerCase();
+      return n.includes(rn.split(" ")[0]) || (rn.includes("entrance") && (n.includes("entry") || n.includes("porch") || n.includes("lobby")));
+    });
+
+    if (matchedRoom && matchedRoom.orientation) {
+      const orient = matchedRoom.orientation.toLowerCase();
+      const pass = rule.match(orient);
+      results.push({
+        rule: rule.room,
+        ideal: rule.ideal,
+        actual: matchedRoom.orientation,
+        pass,
+        note: pass
+          ? `Correctly placed — ${matchedRoom.orientation} aligns with Vastu`
+          : `Currently ${matchedRoom.orientation} — Vastu recommends ${rule.ideal}`,
+      });
+    }
+  }
+
+  // Main entrance check
+  if (facing) {
+    const entranceGood = facing.includes("east") || facing.includes("north");
+    results.unshift({
+      rule: "Main Entrance",
+      ideal: "East or North",
+      actual: project.plotInfo?.facing ?? "",
+      pass: entranceGood,
+      note: entranceGood
+        ? "East/North entrance is considered very auspicious"
+        : `${project.plotInfo?.facing} entrance — Vastu prefers East or North`,
+    });
+  }
+
+  if (results.length === 0) return;
+
+  // Vastu score
+  const passCount = results.filter(r => r.pass).length;
+  const score = Math.round((passCount / results.length) * 100);
+
+  // Score display
+  page.drawText(`${score}%`, {
+    x: W - M - 80, y: H - M - 10, size: 36, font: bold, color: accent,
+  });
+  page.drawText("VASTU SCORE", {
+    x: W - M - 80, y: H - M - 48, size: 7, font, color: C.muted,
+  });
+
+  // Results list
+  const startY = H - M - 55;
+  const rowH = 36;
+
+  results.slice(0, 7).forEach((r, i) => {
+    const y = startY - i * rowH;
+
+    // Pass/fail indicator
+    const indicator = r.pass ? "OK" : "--";
+    const indicatorColor = r.pass ? rgb(0.2, 0.7, 0.4) : rgb(0.6, 0.4, 0.2);
+    page.drawText(indicator, {
+      x: M, y: y, size: 9, font: bold, color: indicatorColor,
+    });
+
+    // Room name + ideal direction
+    page.drawText(`${r.rule.toUpperCase()}`, {
+      x: M + 30, y: y, size: 8, font: bold, color: C.light,
+    });
+    page.drawText(`Ideal: ${r.ideal}  |  Actual: ${r.actual}`, {
+      x: M + 30, y: y - 13, size: 7.5, font, color: C.muted,
+    });
+
+    // Note
+    const noteLines = wrapText(r.note, font, 7, W - M * 2 - 40);
+    noteLines.slice(0, 1).forEach((line, li) => {
+      page.drawText(line, {
+        x: M + 30, y: y - 24 - li * 10, size: 7, font: italic, color: C.muted,
+      });
+    });
+  });
+
+  // Disclaimer
+  page.drawText("Vastu analysis is indicative — based on room orientation data from AI analysis.", {
+    x: M, y: M + FOOTER_H + 8, size: 6, font, color: C.muted,
   });
 }
