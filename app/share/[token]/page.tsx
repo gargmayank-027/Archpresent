@@ -192,10 +192,26 @@ export default function SharePage() {
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type SlideType = "cover" | "site" | "plan" | "strengths" | "overall-mood" | "room-mood";
+type SlideType = "cover" | "site" | "plan" | "strengths" | "walkthrough" | "highlights" | "vastu" | "overall-mood" | "room-mood" | "thankyou";
 type Slide = { type: SlideType; label: string; roomName?: string };
 
 function buildSlides(p: Project): Slide[] {
+  const isConcept = p.presentationType === "concept";
+
+  if (isConcept) {
+    return [
+      { type: "cover", label: "Cover" },
+      ...(p.plotInfo && Object.keys(p.plotInfo).length > 0 ? [{ type: "site" as SlideType, label: "Site Context" }] : []),
+      { type: "plan", label: "Floor Plan" },
+      ...((p.planStrengths ?? []).length > 0 ? [{ type: "strengths" as SlideType, label: "Plan Strengths" }] : []),
+      ...((p.analysis?.rooms?.length ?? 0) > 0 ? [{ type: "walkthrough" as SlideType, label: "Room Walkthrough" }] : []),
+      ...((p.analysis?.rooms?.length ?? 0) > 0 ? [{ type: "highlights" as SlideType, label: "Why This Works" }] : []),
+      ...(p.plotInfo?.facing ? [{ type: "vastu" as SlideType, label: "Vastu Analysis" }] : []),
+      { type: "thankyou", label: "Thank You" },
+    ];
+  }
+
+  // Interior presentation
   return [
     { type: "cover", label: "Cover" },
     ...(p.plotInfo && Object.keys(p.plotInfo).length > 0 ? [{ type: "site" as SlideType, label: "Site Context" }] : []),
@@ -203,6 +219,7 @@ function buildSlides(p: Project): Slide[] {
     ...((p.planStrengths ?? []).length > 0 ? [{ type: "strengths" as SlideType, label: "Plan Strengths" }] : []),
     ...(p.overallMoodboard ? [{ type: "overall-mood" as SlideType, label: "Interior Style" }] : []),
     ...(p.roomMoodboards ?? []).map((rm) => ({ type: "room-mood" as SlideType, label: rm.roomName, roomName: rm.roomName })),
+    { type: "thankyou", label: "Thank You" },
   ];
 }
 
@@ -213,8 +230,12 @@ function SlideRenderer({ slide, project: p }: { slide: Slide; project: Project }
     case "site":         return <SiteSlide project={p} />;
     case "plan":         return <PlanSlide project={p} />;
     case "strengths":    return <StrengthsSlide project={p} />;
+    case "walkthrough":  return <WalkthroughSlide project={p} />;
+    case "highlights":   return <HighlightsSlide project={p} />;
+    case "vastu":        return <VastuSlide project={p} />;
     case "overall-mood": return <OverallMoodSlide project={p} />;
     case "room-mood":    return <RoomMoodSlide project={p} roomName={slide.roomName!} />;
+    case "thankyou":     return <ThankYouSlide project={p} />;
     default:             return <div className="w-full h-full bg-stone-900" />;
   }
 }
@@ -304,22 +325,25 @@ function SiteSlide({ project: p }: { project: Project }) {
 
 // ─── Plan ─────────────────────────────────────────────────────────────────────
 function PlanSlide({ project: p }: { project: Project }) {
+  // Use best available plan: AI render > color-coded > enhanced > original
+  const planSrc = p.aiRenderedPlanUrl ?? p.renderedPlanUrl ?? p.planImageUrl;
+
   return (
-    <div className="w-full h-full bg-[#111110] flex" style={{ animation: "fadeIn .4s ease" }}>
-      <div className="flex-1 flex items-center justify-center p-6">
-        <img src={p.planImageUrl} alt="Floor Plan" className="max-w-full max-h-full object-contain" style={{ imageRendering: "crisp-edges" }} />
+    <div className="w-full h-full bg-[#111110] flex flex-col sm:flex-row" style={{ animation: "fadeIn .4s ease" }}>
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6">
+        <img src={planSrc} alt="Floor Plan" className="max-w-full max-h-full object-contain rounded" style={{ imageRendering: "crisp-edges" }} />
       </div>
-      <div className="w-44 bg-[#0d0d0c] flex flex-col justify-between p-5 border-l border-white/5">
+      <div className="w-full sm:w-48 bg-[#0d0d0c] flex flex-col justify-between p-4 sm:p-5 border-t sm:border-t-0 sm:border-l border-white/5 max-h-48 sm:max-h-none overflow-y-auto">
         <div>
           <p className="font-mono text-[9px] text-stone-600 uppercase tracking-widest mb-3">Rooms</p>
-          {(p.analysis?.rooms ?? []).slice(0, 10).map((r, i) => (
+          {(p.analysis?.rooms ?? []).map((r, i) => (
             <div key={i} className="flex justify-between py-1.5 border-b border-white/5">
               <span className="text-[10px] text-stone-500 truncate">{r.name}</span>
-              {r.sizeEstimateSqm && <span className="font-mono text-[9px] text-stone-700 ml-2">{r.sizeEstimateSqm}m²</span>}
+              {r.sizeEstimateSqm && <span className="font-mono text-[9px] text-stone-700 ml-2 flex-shrink-0">{r.sizeEstimateSqm}m2</span>}
             </div>
           ))}
         </div>
-        {p.analysis?.totalAreaSqm && <p className="font-mono text-[9px] text-stone-600">Total · {p.analysis.totalAreaSqm} m²</p>}
+        {p.analysis?.totalAreaSqm && <p className="font-mono text-[9px] text-stone-600 mt-3">Total: {p.analysis.totalAreaSqm} m2</p>}
       </div>
     </div>
   );
@@ -416,6 +440,174 @@ function RoomMoodSlide({ project: p, roomName }: { project: Project; roomName: s
             <span className="absolute left-4 top-1/2 -translate-y-1/2 font-mono text-[9px] text-white uppercase tracking-widest">{rm.images[3].caption}</span>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Walkthrough (concept) ─────────────────────────────────────────────────
+function WalkthroughSlide({ project: p }: { project: Project }) {
+  const rooms = p.analysis?.rooms ?? [];
+  return (
+    <div className="w-full h-full bg-[#1a1917] flex flex-col overflow-hidden" style={{ animation: "fadeIn .4s ease" }}>
+      <div className="px-8 sm:px-16 pt-8 flex-shrink-0">
+        <p className="font-mono text-[10px] tracking-[0.25em] text-amber-500/80 uppercase">A Walk Through Your Home</p>
+        <p className="text-white/40 text-sm mt-1">Every space has been designed with purpose.</p>
+      </div>
+      <div className="flex-1 overflow-y-auto px-8 sm:px-16 py-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-5">
+          {rooms.map((room) => {
+            const n = room.name.toLowerCase();
+            const icon = n.includes("bed") ? "🛏" : n.includes("kitchen") ? "🍳" : n.includes("living") || n.includes("drawing") ? "🛋" :
+              n.includes("pooja") || n.includes("puja") ? "🕉" : n.includes("toilet") || n.includes("bath") ? "🚿" :
+              n.includes("dining") ? "🍽" : n.includes("stair") || n.includes("lift") ? "⬆" : "◻";
+            return (
+              <div key={room.name} className="flex gap-3">
+                <span className="text-lg mt-0.5 flex-shrink-0 opacity-60">{icon}</span>
+                <div className="min-w-0">
+                  <p className="text-white/90 text-sm font-medium">{room.name}</p>
+                  {room.sizeEstimateSqm && <p className="text-white/30 text-xs font-mono">{room.sizeEstimateSqm} m2</p>}
+                  <p className="text-white/50 text-xs leading-relaxed mt-0.5">
+                    {room.orientation ? `${room.orientation}-facing. ` : ""}
+                    {room.specialFeatures?.slice(0, 2).join(", ") ?? ""}
+                    {room.adjacentRooms?.length ? ` Connected to ${room.adjacentRooms.slice(0, 2).join(" and ")}.` : ""}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Highlights (concept) ────────────────────────────────────────────────────
+function HighlightsSlide({ project: p }: { project: Project }) {
+  const rooms = p.analysis?.rooms ?? [];
+  const facing = p.plotInfo?.facing ?? "";
+
+  const insights: { title: string; detail: string }[] = [];
+
+  const bedrooms = rooms.filter(r => r.name.toLowerCase().includes("bed"));
+  const living = rooms.filter(r => r.name.toLowerCase().includes("living") || r.name.toLowerCase().includes("drawing"));
+  if (bedrooms.length > 0 && living.length > 0) {
+    insights.push({ title: "Private + Social Zones", detail: `${bedrooms.length} bedroom${bedrooms.length > 1 ? "s" : ""} separated from ${living.length} social space${living.length > 1 ? "s" : ""} — privacy when you need it.` });
+  }
+  if (facing) {
+    const f = facing.toLowerCase();
+    insights.push({ title: `${facing}-Facing`, detail: f.includes("east") ? "Morning sun in living areas — naturally bright without harsh glare." : f.includes("north") ? "Consistent daylight throughout the day." : `${facing} orientation — designed for comfort.` });
+  }
+  const suites = bedrooms.filter(b => (b.adjacentRooms ?? []).some(a => a.toLowerCase().includes("dress") || a.toLowerCase().includes("toilet")));
+  if (suites.length > 0) {
+    insights.push({ title: `${suites.length} Self-Contained Suite${suites.length > 1 ? "s" : ""}`, detail: "Bedroom + dressing + bathroom — no sharing, no morning queues." });
+  }
+  const hasServiceKit = rooms.some(r => r.name.toLowerCase().includes("serv"));
+  if (hasServiceKit) {
+    insights.push({ title: "Dual Kitchen", detail: "Main kitchen for family, service kitchen for heavy-duty — keeps the main space clean." });
+  }
+  const pooja = rooms.find(r => r.name.toLowerCase().includes("pooja") || r.name.toLowerCase().includes("puja"));
+  if (pooja) {
+    insights.push({ title: "Dedicated Pooja Room", detail: "A proper, peaceful prayer space — not a corner of another room." });
+  }
+
+  return (
+    <div className="w-full h-full bg-[#1a1917] flex flex-col justify-center px-8 sm:px-16" style={{ animation: "fadeIn .4s ease" }}>
+      <p className="font-mono text-[10px] tracking-[0.25em] text-amber-500/80 uppercase mb-2">Why This Plan Works</p>
+      <p className="text-white/40 text-sm mb-8">Key design decisions that make this home work for everyday life.</p>
+      <div className="space-y-6">
+        {insights.slice(0, 5).map((item, i) => (
+          <div key={i} className="flex gap-4 items-start">
+            <span className="font-mono text-amber-500/60 text-sm mt-0.5 w-6 flex-shrink-0">{String(i + 1).padStart(2, "0")}</span>
+            <div>
+              <p className="text-white/90 text-sm font-medium">{item.title}</p>
+              <p className="text-white/45 text-xs leading-relaxed mt-0.5">{item.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Vastu (concept) ─────────────────────────────────────────────────────────
+function VastuSlide({ project: p }: { project: Project }) {
+  const rooms = p.analysis?.rooms ?? [];
+  const facing = (p.plotInfo?.facing ?? "").toLowerCase();
+
+  const checks: { label: string; ideal: string; actual: string; pass: boolean }[] = [];
+
+  const vastuMap: { match: string; ideal: string; test: (o: string) => boolean }[] = [
+    { match: "bed", ideal: "South-West", test: o => o.includes("south") || o.includes("west") },
+    { match: "kitchen", ideal: "South-East", test: o => o.includes("south") || o.includes("east") },
+    { match: "pooja", ideal: "North-East", test: o => o.includes("north") || o.includes("east") },
+    { match: "living", ideal: "North/East", test: o => o.includes("north") || o.includes("east") },
+    { match: "drawing", ideal: "North/East", test: o => o.includes("north") || o.includes("east") },
+  ];
+
+  // Entrance check
+  if (facing) {
+    const good = facing.includes("east") || facing.includes("north");
+    checks.push({ label: "Main Entrance", ideal: "East/North", actual: p.plotInfo?.facing ?? "", pass: good });
+  }
+
+  for (const rule of vastuMap) {
+    const room = rooms.find(r => r.name.toLowerCase().includes(rule.match));
+    if (room?.orientation) {
+      checks.push({ label: room.name, ideal: rule.ideal, actual: room.orientation, pass: rule.test(room.orientation.toLowerCase()) });
+    }
+  }
+
+  const score = checks.length > 0 ? Math.round(checks.filter(c => c.pass).length / checks.length * 100) : 0;
+
+  return (
+    <div className="w-full h-full bg-[#1a1917] flex flex-col justify-center px-8 sm:px-16" style={{ animation: "fadeIn .4s ease" }}>
+      <div className="flex items-start justify-between mb-8">
+        <div>
+          <p className="font-mono text-[10px] tracking-[0.25em] text-amber-500/80 uppercase">Vastu Analysis</p>
+          <p className="text-white/40 text-sm mt-1">Alignment with Vastu Shastra principles.</p>
+        </div>
+        <div className="text-right">
+          <p className="text-4xl font-light text-amber-500/80">{score}%</p>
+          <p className="font-mono text-[9px] text-white/30 uppercase tracking-widest">Vastu Score</p>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {checks.map((c, i) => (
+          <div key={i} className="flex items-center gap-4 py-2 border-b border-white/5">
+            <span className={`w-6 text-center text-xs font-medium ${c.pass ? "text-emerald-400" : "text-amber-400/60"}`}>
+              {c.pass ? "OK" : "--"}
+            </span>
+            <div className="flex-1">
+              <p className="text-white/80 text-sm">{c.label}</p>
+            </div>
+            <p className="text-white/30 text-xs font-mono">Ideal: {c.ideal}</p>
+            <p className="text-white/50 text-xs font-mono">{c.actual}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-white/20 text-[9px] mt-6">Based on AI-detected room orientations. For detailed Vastu consultation, please consult a certified practitioner.</p>
+    </div>
+  );
+}
+
+// ─── Thank You ───────────────────────────────────────────────────────────────
+function ThankYouSlide({ project: p }: { project: Project }) {
+  return (
+    <div className="w-full h-full flex items-center justify-center" style={{ animation: "fadeIn .4s ease" }}>
+      <div className="absolute inset-0 bg-[#1a1917]" />
+      <div className="relative text-center px-8">
+        <p className="font-mono text-[10px] tracking-[0.25em] text-amber-500/60 uppercase mb-4">{p.firmName}</p>
+        <h2 className="text-3xl sm:text-5xl font-light text-white/90 mb-4" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+          Thank you
+        </h2>
+        <p className="text-white/40 text-sm mb-8">
+          We look forward to bringing {p.name} to life.
+        </p>
+        <div className="flex items-center justify-center gap-6 text-white/25 text-xs font-mono">
+          {p.plotInfo?.city && <span>{p.plotInfo.city}{p.plotInfo.state ? `, ${p.plotInfo.state}` : ""}</span>}
+          {p.clientName && <span>Prepared for {p.clientName}</span>}
+        </div>
       </div>
     </div>
   );
