@@ -259,9 +259,36 @@ export default function ExportPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {/* Theme selector */}
+            <div className="flex items-center gap-1 border border-stone-200 rounded-sm overflow-hidden">
+              {([
+                { value: "classic", label: "Classic" },
+                { value: "dark", label: "Dark" },
+                { value: "minimal", label: "Minimal" },
+                { value: "warm", label: "Warm" },
+              ] as const).map((t) => (
+                <button key={t.value}
+                  onClick={async () => {
+                    await fetch(`/api/projects/${id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ presentationTheme: t.value }),
+                    });
+                    setProject(p => p ? { ...p, presentationTheme: t.value } : p);
+                  }}
+                  className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest transition-colors ${
+                    (project?.presentationTheme ?? "classic") === t.value
+                      ? "bg-stone-900 text-white"
+                      : "text-stone-400 hover:text-stone-700"
+                  }`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
             <button onClick={reanalysePlan} disabled={reanalysing || exporting}
-              className="btn-ghost text-xs" title="Re-run plan analysis to update room data and enable plan cropping">
-              {reanalysing ? <><span className="spinner w-3 h-3" style={{borderWidth:1}} /><span>Re-analysing…</span></> : "⟳ Re-analyse"}
+              className="btn-ghost text-xs" title="Re-run plan analysis">
+              {reanalysing ? <><span className="spinner w-3 h-3" style={{borderWidth:1}} /><span>Re-analysing…</span></> : "Re-analyse"}
             </button>
             {!isConcept && (
               <a href={`/project/${id}/moodboards`} className="btn-secondary">
@@ -508,6 +535,67 @@ export default function ExportPage() {
           )}
         </div>
       </div>
+
+      {/* ── Client Feedback ──────────────────────────────────────────────── */}
+      {(project.clientFeedback ?? []).length > 0 && (
+        <div className="mt-6 card p-6 fade-up fade-up-3">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-mono text-xs tracking-widest text-stone-400 uppercase">Client Feedback</h3>
+            <span className="font-mono text-[10px] text-stone-400 bg-stone-100 px-2 py-0.5 rounded-sm">
+              {project.clientFeedback!.length} {project.clientFeedback!.length === 1 ? "response" : "responses"}
+            </span>
+          </div>
+
+          {/* Reaction summary */}
+          <div className="flex gap-4 mb-4 pb-4 border-b border-stone-100">
+            {[
+              { emoji: "❤️", label: "Love", value: "love" },
+              { emoji: "👍", label: "Like", value: "like" },
+              { emoji: "🤔", label: "Thinking", value: "neutral" },
+              { emoji: "💭", label: "Concern", value: "concern" },
+            ].map((r) => {
+              const count = project.clientFeedback!.filter((f) => f.reaction === r.value).length;
+              return count > 0 ? (
+                <div key={r.value} className="flex items-center gap-1.5">
+                  <span className="text-sm">{r.emoji}</span>
+                  <span className="font-mono text-[10px] text-stone-500">{count}</span>
+                </div>
+              ) : null;
+            })}
+          </div>
+
+          {/* Individual comments */}
+          <div className="space-y-3 max-h-48 overflow-y-auto">
+            {project.clientFeedback!
+              .filter((f) => f.comment)
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+              .map((f) => (
+                <div key={f.id} className="flex gap-3">
+                  <div className="w-6 h-6 rounded-full bg-stone-200 flex items-center justify-center flex-shrink-0">
+                    <span className="text-[9px] text-stone-500 font-medium uppercase">
+                      {f.clientName[0]}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-stone-700 font-medium">{f.clientName}</span>
+                      {f.reaction && <span className="text-xs">
+                        {f.reaction === "love" ? "❤️" : f.reaction === "like" ? "👍" : f.reaction === "neutral" ? "🤔" : "💭"}
+                      </span>}
+                      <span className="text-[9px] text-stone-400">
+                        {f.slideIndex !== null ? `Slide ${f.slideIndex + 1}` : ""} · {timeAgo(f.createdAt)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-stone-500 mt-0.5">{f.comment}</p>
+                  </div>
+                </div>
+              ))}
+            {project.clientFeedback!.filter((f) => f.comment).length === 0 && (
+              <p className="text-xs text-stone-400">Reactions received but no written comments yet.</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Export footer ────────────────────────────────────────────────── */}
       <div className="mt-8 flex items-center justify-between pt-6 border-t border-stone-200 fade-up fade-up-4">

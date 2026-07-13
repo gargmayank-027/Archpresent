@@ -66,6 +66,19 @@ export interface Project {
   shareExpiresAt?: string;   // ISO string, undefined = never expires
   shareViewCount?: number;   // how many times the link was opened
   shareLastViewedAt?: string; // ISO timestamp of last view
+
+  // Client feedback from the shared presentation viewer
+  clientFeedback?: {
+    id: string;
+    clientName: string;
+    reaction: "love" | "like" | "neutral" | "concern" | null;
+    comment: string | null;
+    slideIndex: number | null;
+    createdAt: string;
+  }[];
+
+  // Presentation visual theme
+  presentationTheme?: "classic" | "dark" | "minimal" | "warm";
 }
 
 export interface RoomSummary {

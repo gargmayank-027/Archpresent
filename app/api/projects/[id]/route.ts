@@ -38,29 +38,37 @@ export async function PATCH(
     }
 
     const body = await req.json();
-    const { selectedPageIndex } = body as { selectedPageIndex?: number };
 
-    if (selectedPageIndex === undefined) {
-      return NextResponse.json({ error: "selectedPageIndex is required" }, { status: 400 });
+    // Floor selection (existing behavior)
+    if (body.selectedPageIndex !== undefined) {
+      const page = project.planPages?.[body.selectedPageIndex];
+      if (!page) {
+        return NextResponse.json({ error: "No such page on this project" }, { status: 400 });
+      }
+      const updated = await projectStore.update(params.id, {
+        selectedPageIndex: body.selectedPageIndex,
+        floorSelectionConfirmed: true,
+        planImageUrl:  page.imageUrl,
+        planImagePath: page.imagePath,
+        analysis: undefined,
+        planStrengths: undefined,
+        status: "created",
+      });
+      return NextResponse.json({ project: updated });
     }
-    const page = project.planPages?.[selectedPageIndex];
-    if (!page) {
-      return NextResponse.json({ error: "No such page on this project" }, { status: 400 });
+
+    // General field updates (theme, name, etc.)
+    const allowedFields = ["presentationTheme", "name", "clientName"];
+    const patch: Record<string, unknown> = {};
+    for (const field of allowedFields) {
+      if (body[field] !== undefined) patch[field] = body[field];
     }
 
-    // Switching floors invalidates any prior analysis/moodboards run against
-    // the previously-selected page — clear them out rather than leaving
-    // stale room data attached to a different floor plan.
-    const updated = await projectStore.update(params.id, {
-      selectedPageIndex,
-      floorSelectionConfirmed: true,
-      planImageUrl:  page.imageUrl,
-      planImagePath: page.imagePath,
-      analysis: undefined,
-      planStrengths: undefined,
-      status: "created",
-    });
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+    }
 
+    const updated = await projectStore.update(params.id, patch);
     return NextResponse.json({ project: updated });
   } catch (err) {
     console.error("[PATCH /api/projects/[id]]", err);

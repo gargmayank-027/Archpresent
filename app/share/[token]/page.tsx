@@ -11,6 +11,10 @@ export default function SharePage() {
   const [error,    setError]    = useState<string | null>(null);
   const [slide,    setSlide]    = useState(0);
   const [showNav,  setShowNav]  = useState(true);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackName, setFeedbackName] = useState("");
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [feedbackSent, setFeedbackSent] = useState(false);
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -58,6 +62,42 @@ export default function SharePage() {
   const slides  = buildSlides(project);
   const current = slides[slide];
 
+  async function sendReaction(reaction: string) {
+    try {
+      await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shareToken: token,
+          clientName: feedbackName || "Client",
+          reaction,
+          slideIndex: slide,
+        }),
+      });
+      setFeedbackSent(true);
+      setTimeout(() => setFeedbackSent(false), 2000);
+    } catch {}
+  }
+
+  async function sendComment() {
+    if (!feedbackComment.trim()) return;
+    try {
+      await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shareToken: token,
+          clientName: feedbackName || "Client",
+          comment: feedbackComment,
+          slideIndex: slide,
+        }),
+      });
+      setFeedbackComment("");
+      setFeedbackSent(true);
+      setTimeout(() => setFeedbackSent(false), 2000);
+    } catch {}
+  }
+
   return (
     <div className="fixed inset-0 bg-black flex flex-col select-none"
          style={{ fontFamily: "'Instrument Sans', system-ui, sans-serif" }}>
@@ -67,6 +107,57 @@ export default function SharePage() {
           onClick={() => { setSlide((s) => Math.max(s - 1, 0)); resetTimer(); }} />
         <button className="absolute right-0 top-0 w-1/3 h-full z-10 cursor-e-resize opacity-0"
           onClick={() => { setSlide((s) => Math.min(s + 1, slides.length - 1)); resetTimer(); }} />
+
+        {/* Feedback button — top right */}
+        <button onClick={() => setShowFeedback(!showFeedback)}
+          className="absolute top-4 right-4 z-20 bg-white/10 hover:bg-white/20 backdrop-blur-sm rounded-full px-4 py-2 transition-all flex items-center gap-2">
+          <span className="text-sm">💬</span>
+          <span className="text-[10px] text-white/60 uppercase tracking-widest font-mono">Feedback</span>
+        </button>
+
+        {/* Feedback panel */}
+        {showFeedback && (
+          <div className="absolute top-14 right-4 z-20 w-72 bg-white/95 backdrop-blur-md rounded-lg shadow-2xl p-4"
+            onClick={(e) => e.stopPropagation()}>
+            <p className="text-xs text-stone-800 font-medium mb-3">How do you feel about this design?</p>
+
+            {/* Reactions */}
+            <div className="flex gap-2 mb-3">
+              {[
+                { emoji: "❤️", label: "Love it", value: "love" },
+                { emoji: "👍", label: "Good", value: "like" },
+                { emoji: "🤔", label: "Thinking", value: "neutral" },
+                { emoji: "💭", label: "Concern", value: "concern" },
+              ].map((r) => (
+                <button key={r.value} onClick={() => sendReaction(r.value)}
+                  className="flex-1 flex flex-col items-center gap-1 p-2 rounded-md hover:bg-stone-100 transition-colors">
+                  <span className="text-lg">{r.emoji}</span>
+                  <span className="text-[8px] text-stone-500 uppercase">{r.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Name */}
+            <input type="text" placeholder="Your name (optional)"
+              value={feedbackName} onChange={(e) => setFeedbackName(e.target.value)}
+              className="w-full text-xs border border-stone-200 rounded px-3 py-2 mb-2 bg-white" />
+
+            {/* Comment */}
+            <textarea placeholder="Any specific thoughts on this slide?"
+              value={feedbackComment} onChange={(e) => setFeedbackComment(e.target.value)}
+              rows={2}
+              className="w-full text-xs border border-stone-200 rounded px-3 py-2 mb-2 bg-white resize-none" />
+
+            <button onClick={sendComment} disabled={!feedbackComment.trim()}
+              className="w-full text-[10px] uppercase tracking-widest bg-stone-900 text-white py-2 rounded hover:bg-stone-700 disabled:opacity-30 transition-colors">
+              {feedbackSent ? "Sent!" : "Send feedback"}
+            </button>
+
+            <p className="text-[9px] text-stone-400 text-center mt-2">
+              Slide {slide + 1} of {slides.length}: {current.label}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className={`flex-shrink-0 transition-opacity duration-300 ${showNav ? "opacity-100" : "opacity-0"}`}>
