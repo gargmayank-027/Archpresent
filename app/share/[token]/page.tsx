@@ -235,7 +235,7 @@ function buildSlides(p: Project): Slide[] {
       ...((p.planStrengths ?? []).length > 0 ? [{ type: "strengths" as SlideType, label: "Plan Strengths" }] : []),
       ...((p.analysis?.rooms?.length ?? 0) > 0 ? [{ type: "walkthrough" as SlideType, label: "Room Walkthrough" }] : []),
       ...((p.analysis?.rooms?.length ?? 0) > 0 ? [{ type: "highlights" as SlideType, label: "Why This Works" }] : []),
-      ...(p.plotInfo?.facing ? [{ type: "vastu" as SlideType, label: "Vastu Analysis" }] : []),
+      ...(p.plotInfo?.showVastu && p.plotInfo?.facing ? [{ type: "vastu" as SlideType, label: "Vastu Analysis" }] : []),
       { type: "thankyou", label: "Thank You" },
     ];
   }

@@ -82,6 +82,17 @@ export async function POST(req: NextRequest) {
     if (cityRaw && String(cityRaw).trim())       plotInfo.city    = String(cityRaw).trim();
     if (stateRaw && String(stateRaw).trim())     plotInfo.state   = String(stateRaw).trim();
     if (countryRaw && String(countryRaw).trim())  plotInfo.country = String(countryRaw).trim();
+
+    // Client brief
+    const familyDetailsRaw = formData.get("familyDetails");
+    const lifestyleRaw     = formData.get("lifestyle");
+    const prioritiesRaw    = formData.get("priorities");
+    const showVastuRaw     = formData.get("showVastu");
+    if (familyDetailsRaw && String(familyDetailsRaw).trim()) plotInfo.familyDetails = String(familyDetailsRaw).trim();
+    if (lifestyleRaw && String(lifestyleRaw).trim())         plotInfo.lifestyle = String(lifestyleRaw).trim();
+    if (prioritiesRaw && String(prioritiesRaw).trim())       plotInfo.priorities = String(prioritiesRaw).trim();
+    if (showVastuRaw === "true")                             plotInfo.showVastu = true;
+
     if (plotAreaRaw)     plotInfo.plotAreaSqm        = Number(plotAreaRaw);
     if (builtUpAreaRaw)  plotInfo.builtUpAreaSqm     = Number(builtUpAreaRaw);
     if (facingRaw)       plotInfo.facing             = facingRaw as PlotFacing;

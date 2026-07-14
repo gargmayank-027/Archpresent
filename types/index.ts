@@ -13,6 +13,14 @@ export interface PlotInfo {
   country?: string;           // defaults to "India" if not specified
   climateZone?: ClimateZone;  // hot-dry, warm-humid, composite, cold, temperate
 
+  // Client brief — captured during project setup
+  familySize?: number;          // e.g. 4 (couple + 2 kids)
+  familyDetails?: string;       // e.g. "Couple, 2 school-age kids, elderly parents"
+  lifestyle?: string;           // e.g. "Work from home, loves cooking, hosts often"
+  priorities?: string;          // e.g. "Privacy, natural light, low maintenance"
+  budgetRange?: string;         // e.g. "60-80 lakhs"
+  showVastu?: boolean;          // client wants Vastu analysis? (default: false)
+
   plotAreaSqm?: number;           // total plot / carpet area in sqm
   builtUpAreaSqm?: number;        // built-up / super built-up area in sqm
   facing?: PlotFacing;            // main entrance / plot facing direction

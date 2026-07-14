@@ -43,6 +43,12 @@ export default function NewProjectPage() {
   const [state_, setState_]   = useState("");
   const [country, setCountry] = useState("India");
 
+  // ── Client brief ──────────────────────────────────────────────────────────
+  const [familyDetails, setFamilyDetails] = useState("");
+  const [lifestyle, setLifestyle]         = useState("");
+  const [priorities, setPriorities]       = useState("");
+  const [showVastu, setShowVastu]         = useState(false);
+
   // ── Plot / site info ───────────────────────────────────────────────────────
   const [plotAreaSqm, setPlotAreaSqm]           = useState("");
   const [builtUpAreaSqm, setBuiltUpAreaSqm]     = useState("");
@@ -160,6 +166,10 @@ export default function NewProjectPage() {
       if (city.trim())        fd.append("city",           city.trim());
       if (state_.trim())      fd.append("state",          state_.trim());
       if (country.trim())     fd.append("country",        country.trim());
+      if (familyDetails.trim()) fd.append("familyDetails", familyDetails.trim());
+      if (lifestyle.trim())   fd.append("lifestyle",      lifestyle.trim());
+      if (priorities.trim())  fd.append("priorities",     priorities.trim());
+      if (showVastu)          fd.append("showVastu",      "true");
       if (plotAreaSqm)      fd.append("plotAreaSqm",      plotAreaSqm);
       if (builtUpAreaSqm)   fd.append("builtUpAreaSqm",   builtUpAreaSqm);
       if (facing)           fd.append("facing",           facing);
@@ -340,6 +350,44 @@ export default function NewProjectPage() {
                 value={country} onChange={(e) => setCountry(e.target.value)} />
             </div>
           </div>
+
+          {/* Client brief — only for concept presentations */}
+          {presentationType === "concept" && (
+            <>
+              <div className="pt-2 border-t border-stone-100">
+                <p className="font-mono text-[9px] text-amber-600 uppercase tracking-widest mb-3">Client Brief</p>
+                <p className="text-[11px] text-stone-400 mb-3">
+                  Tell us about the client — this personalises the presentation.
+                </p>
+              </div>
+              <div>
+                <label className="field-label">Family / Residents</label>
+                <input className="field-input" type="text"
+                  placeholder="e.g. Couple, 2 school-age kids, elderly mother"
+                  value={familyDetails} onChange={(e) => setFamilyDetails(e.target.value)} />
+              </div>
+              <div>
+                <label className="field-label">Lifestyle Notes</label>
+                <input className="field-input" type="text"
+                  placeholder="e.g. Works from home, loves cooking, hosts often"
+                  value={lifestyle} onChange={(e) => setLifestyle(e.target.value)} />
+              </div>
+              <div>
+                <label className="field-label">Client Priorities</label>
+                <input className="field-input" type="text"
+                  placeholder="e.g. Privacy, natural light, low maintenance, Vastu"
+                  value={priorities} onChange={(e) => setPriorities(e.target.value)} />
+              </div>
+              <div className="flex items-center gap-3">
+                <input type="checkbox" id="showVastu" checked={showVastu}
+                  onChange={(e) => setShowVastu(e.target.checked)}
+                  className="w-4 h-4 rounded border-stone-300" />
+                <label htmlFor="showVastu" className="text-sm text-stone-600">
+                  Include Vastu compliance analysis
+                </label>
+              </div>
+            </>
+          )}
 
           {/* Areas */}
           <div className="grid grid-cols-2 gap-4">

@@ -223,7 +223,7 @@ export default function ExportPage() {
     ...(isConcept && (analysis?.rooms?.length ?? 0) > 0
       ? [{ type: "highlights" as const, label: "Why This Works", icon: "06" }]
       : []),
-    ...(isConcept && project.plotInfo?.facing
+    ...(isConcept && project.plotInfo?.showVastu && project.plotInfo?.facing
       ? [{ type: "vastu" as const, label: "Vastu Analysis", icon: "07" }]
       : []),
 

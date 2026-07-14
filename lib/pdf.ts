@@ -115,8 +115,8 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
       await addSpatialHighlightsSlide(doc, project, accent, reg, bold, italic);
     }
 
-    // Vastu compliance check (if facing info is available)
-    if (project.plotInfo?.facing && project.analysis?.rooms?.length) {
+    // Vastu compliance check (only if client opted in)
+    if (project.plotInfo?.showVastu && project.plotInfo?.facing && project.analysis?.rooms?.length) {
       await addVastuSlide(doc, project, accent, reg, bold, italic);
     }
 
@@ -1099,9 +1099,14 @@ async function addRoomWalkthroughSlide(
     x: M, y: H - M - 4, size: 9, font: bold, color: accent,
   });
 
-  // Subtitle
-  page.drawText("Every room has been designed with purpose — here's how your home works for you.", {
-    x: M, y: H - M - 22, size: 10, font: italic, color: C.muted,
+  // Personalized subtitle using client brief
+  const brief = project.plotInfo;
+  const subtitle = brief?.familyDetails
+    ? `Designed for ${brief.familyDetails}${brief.priorities ? ` — prioritising ${brief.priorities.toLowerCase()}` : ""}.`
+    : "Every room has been designed with purpose.";
+  const subLines = wrapText(subtitle, italic, 9, W - M * 2);
+  subLines.slice(0, 2).forEach((line, i) => {
+    page.drawText(line, { x: M, y: H - M - 22 - i * 12, size: 9, font: italic, color: C.muted });
   });
 
   // Two-column room descriptions
@@ -1277,7 +1282,12 @@ async function addSpatialHighlightsSlide(
     x: M, y: H - M - 4, size: 9, font: bold, color: accent,
   });
 
-  page.drawText("The key design decisions that make this home work for everyday life.", {
+  // Personalized subtitle
+  const brief = project.plotInfo;
+  const highlightSub = brief?.lifestyle
+    ? `How this home supports your lifestyle — ${brief.lifestyle.toLowerCase()}.`
+    : "The key design decisions that make this home work for everyday life.";
+  page.drawText(highlightSub, {
     x: M, y: H - M - 22, size: 10, font: italic, color: C.muted,
   });
 
@@ -1342,6 +1352,41 @@ async function addSpatialHighlightsSlide(
         detail: `${kitchen.sizeEstimateSqm ? `${kitchen.sizeEstimateSqm} sqm kitchen` : "Kitchen"} with direct dining access — cooking and serving flow naturally.`,
       });
     }
+  }
+
+  // Client-context insights from the brief
+  const lifestyle = project.plotInfo?.lifestyle?.toLowerCase() ?? "";
+  const priorities = project.plotInfo?.priorities?.toLowerCase() ?? "";
+
+  if (lifestyle.includes("work from home") || lifestyle.includes("wfh")) {
+    const study = rooms.find(r => r.name.toLowerCase().includes("study") || r.name.toLowerCase().includes("office"));
+    if (study) {
+      insights.push({ icon: "06", title: "Work-From-Home Ready",
+        detail: `Dedicated ${study.name} positioned for focus — away from the social zones and kitchen noise.` });
+    }
+  }
+
+  if (lifestyle.includes("cook") || lifestyle.includes("kitchen")) {
+    insights.push({ icon: "06", title: "Designed for a Cook",
+      detail: "Kitchen workflow optimised with counter space and direct dining access — cooking is a joy, not a chore." });
+  }
+
+  if (priorities.includes("privacy")) {
+    insights.push({ icon: "06", title: "Privacy by Design",
+      detail: "Bedrooms are zoned away from social spaces — guests and family members don't cross paths." });
+  }
+
+  if (priorities.includes("light") || priorities.includes("ventilation")) {
+    insights.push({ icon: "06", title: "Natural Light Priority",
+      detail: "Room orientations maximise daylight — reducing dependence on artificial lighting during the day." });
+  }
+
+  if (project.plotInfo?.familyDetails?.toLowerCase().includes("elderly") || 
+      project.plotInfo?.familyDetails?.toLowerCase().includes("parent")) {
+    const hasLift = rooms.some(r => r.name.toLowerCase().includes("lift"));
+    insights.push({ icon: "06", title: "Elder-Friendly",
+      detail: hasLift ? "Lift provision ensures accessibility for elderly family members across floors."
+        : "Ground-floor bedroom suite can serve elderly family members without stairs." });
   }
 
   // Pooja room
