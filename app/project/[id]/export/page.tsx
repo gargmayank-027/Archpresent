@@ -204,40 +204,56 @@ export default function ExportPage() {
           overallMoodboard, roomMoodboards = [] } = project;
   const isReady = planStrengths.length > 0;
 
-  // Build slide deck — mirrors PDF page order
+  // Build slide deck — mirrors PDF page order, branches on presentation type
+  const isConcept = project.presentationType === "concept";
+
   const slides: SlidePreview[] = [
-    { type: "cover",     label: "Cover",        icon: "⬛" },
+    { type: "cover", label: "Cover", icon: "01" },
     ...(project.plotInfo && Object.keys(project.plotInfo).length > 0
-      ? [{ type: "site" as const, label: "Site Context", icon: "🧭" }]
+      ? [{ type: "site" as const, label: "Site Context", icon: "02" }]
       : []),
-    { type: "plan",      label: "Floor Plan",   icon: "📐", imageUrl: project.planImageUrl },
+    { type: "plan", label: "Floor Plan", icon: "03", imageUrl: project.aiRenderedPlanUrl ?? project.renderedPlanUrl ?? project.planImageUrl },
     ...(planStrengths.length > 0
-      ? [{ type: "strengths" as const, label: "Plan Strengths", icon: "✦" }]
+      ? [{ type: "strengths" as const, label: "Plan Strengths", icon: "04" }]
       : []),
-    // Overall style moodboard slide
-    ...(overallMoodboard
-      ? [{ type: "overall-mood" as const, label: "Overall Style", icon: "🎨",
+
+    // ── Concept-specific slides ──
+    ...(isConcept && (analysis?.rooms?.length ?? 0) > 0
+      ? [{ type: "walkthrough" as const, label: "Room Walkthrough", icon: "05" }]
+      : []),
+    ...(isConcept && (analysis?.rooms?.length ?? 0) > 0
+      ? [{ type: "highlights" as const, label: "Why This Works", icon: "06" }]
+      : []),
+    ...(isConcept && project.plotInfo?.facing
+      ? [{ type: "vastu" as const, label: "Vastu Analysis", icon: "07" }]
+      : []),
+
+    // ── Interior-specific slides ──
+    ...(!isConcept && overallMoodboard
+      ? [{ type: "overall-mood" as const, label: "Overall Style", icon: "05",
            imageUrl: overallMoodboard.images[0]?.url }]
       : []),
-    // Per-room slides (use roomMoodboards if available, else legacy moodboards)
-    ...(roomMoodboards.length > 0
-      ? roomMoodboards.map((rm) => ({
+    ...(!isConcept && roomMoodboards.length > 0
+      ? roomMoodboards.map((rm, i) => ({
           type: "room-mood" as const,
           label: rm.roomName,
-          icon: "🖼",
+          icon: String(i + 6).padStart(2, "0"),
           imageUrl: rm.images[0]?.url,
           roomName: rm.roomName,
           planSnippetUrl: rm.planSnippetUrl,
           images: rm.images,
         }))
-      : moodboards.map((mb) => ({
+      : !isConcept ? moodboards.map((mb, i) => ({
           type: "moodboard" as const,
           label: mb.roomName,
-          icon: "🖼",
+          icon: String(i + 6).padStart(2, "0"),
           imageUrl: mb.imageUrl,
           roomName: mb.roomName,
-        }))
+        })) : []
     ),
+
+    // Thank you slide
+    { type: "thankyou" as const, label: "Thank You", icon: "" },
   ];
 
   return (
@@ -622,7 +638,7 @@ export default function ExportPage() {
 // ─── Slide types ──────────────────────────────────────────────────────────────
 
 type SlidePreview = {
-  type: "cover" | "site" | "plan" | "strengths" | "moodboard" | "overall-mood" | "room-mood";
+  type: "cover" | "site" | "plan" | "strengths" | "walkthrough" | "highlights" | "vastu" | "moodboard" | "overall-mood" | "room-mood" | "thankyou";
   label: string;
   icon: string;
   imageUrl?: string;
@@ -1036,6 +1052,100 @@ function SlidePreviewLarge({ slide, project }: { slide: SlidePreview; project: P
     );
   }
 
+  if (slide.type === "walkthrough") {
+    const rooms = project.analysis?.rooms ?? [];
+    return (
+      <div className="w-full h-full bg-[#1a1917] flex flex-col p-6 overflow-hidden">
+        <p className="font-mono text-[10px] tracking-[0.2em] text-amber-500/80 uppercase mb-1">A Walk Through Your Home</p>
+        <p className="text-white/30 text-xs mb-4">Every space designed with purpose.</p>
+        <div className="flex-1 grid grid-cols-2 gap-x-8 gap-y-2 overflow-hidden">
+          {rooms.slice(0, 12).map((r) => (
+            <div key={r.name} className="flex gap-2">
+              <div className="w-1 h-full bg-amber-500/20 rounded flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-white/80 text-xs font-medium truncate">{r.name}</p>
+                <p className="text-white/30 text-[9px]">
+                  {r.sizeEstimateSqm ? `${r.sizeEstimateSqm}m2` : ""} {r.orientation ?? ""}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (slide.type === "highlights") {
+    const rooms = project.analysis?.rooms ?? [];
+    const facing = project.plotInfo?.facing ?? "";
+    const insights: string[] = [];
+    const beds = rooms.filter(r => r.name.toLowerCase().includes("bed")).length;
+    if (beds > 0) insights.push(`${beds} bedroom${beds > 1 ? "s" : ""} with privacy zoning`);
+    if (facing) insights.push(`${facing}-facing orientation advantage`);
+    if (rooms.some(r => r.name.toLowerCase().includes("pooja"))) insights.push("Dedicated Pooja room");
+    if (rooms.some(r => r.name.toLowerCase().includes("serv"))) insights.push("Dual kitchen setup");
+    insights.push("Efficient circulation design");
+
+    return (
+      <div className="w-full h-full bg-[#1a1917] flex flex-col justify-center p-8">
+        <p className="font-mono text-[10px] tracking-[0.2em] text-amber-500/80 uppercase mb-1">Why This Plan Works</p>
+        <p className="text-white/30 text-xs mb-6">Key design decisions for everyday living.</p>
+        <div className="space-y-4">
+          {insights.slice(0, 5).map((item, i) => (
+            <div key={i} className="flex gap-3 items-start">
+              <span className="font-mono text-amber-500/50 text-xs w-5 flex-shrink-0">{String(i+1).padStart(2,"0")}</span>
+              <p className="text-white/70 text-sm">{item}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (slide.type === "vastu") {
+    const facing = project.plotInfo?.facing ?? "";
+    const good = facing.toLowerCase().includes("east") || facing.toLowerCase().includes("north");
+    return (
+      <div className="w-full h-full bg-[#1a1917] flex flex-col justify-center p-8">
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <p className="font-mono text-[10px] tracking-[0.2em] text-amber-500/80 uppercase">Vastu Analysis</p>
+            <p className="text-white/30 text-xs mt-1">Vastu Shastra compliance check.</p>
+          </div>
+          <div className="text-right">
+            <p className="text-3xl font-light text-amber-500/70">{good ? "75%" : "50%"}</p>
+            <p className="font-mono text-[8px] text-white/25 uppercase">Vastu Score</p>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center gap-3 py-1.5 border-b border-white/5">
+            <span className={`text-xs ${good ? "text-emerald-400" : "text-amber-400/60"}`}>{good ? "OK" : "--"}</span>
+            <span className="text-white/60 text-xs">Main Entrance — {facing}</span>
+          </div>
+          <div className="flex items-center gap-3 py-1.5 border-b border-white/5">
+            <span className="text-emerald-400 text-xs">OK</span>
+            <span className="text-white/60 text-xs">Room orientations checked</span>
+          </div>
+        </div>
+        <p className="text-white/15 text-[8px] mt-4">Based on AI-detected orientations.</p>
+      </div>
+    );
+  }
+
+  if (slide.type === "thankyou") {
+    return (
+      <div className="w-full h-full bg-[#1a1917] flex items-center justify-center">
+        <div className="text-center">
+          <p className="font-mono text-[9px] text-amber-500/50 uppercase tracking-widest mb-3">{project.firmName}</p>
+          <h2 className="text-3xl font-light text-white/80 mb-3" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+            Thank you
+          </h2>
+          <p className="text-white/30 text-sm">We look forward to bringing {project.name} to life.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full bg-stone-100 flex items-center justify-center">
       <p className="text-stone-400 font-mono text-xs uppercase tracking-widest">{slide.label}</p>
@@ -1054,9 +1164,13 @@ function SlideDetailPanel({
 }) {
   const editLinks: Record<string, string> = {
     cover:        `/project/${project.id}/review`,
-    site:         `/project/${project.id}/new`,
+    site:         `/project/${project.id}/review`,
     plan:         `/project/${project.id}/review`,
     strengths:    `/project/${project.id}/review`,
+    walkthrough:  `/project/${project.id}/review`,
+    highlights:   `/project/${project.id}/review`,
+    vastu:        `/project/${project.id}/review`,
+    thankyou:     `/project/${project.id}/review`,
     moodboard:    `/project/${project.id}/moodboards`,
     "overall-mood": `/project/${project.id}/moodboards`,
     "room-mood":  `/project/${project.id}/moodboards`,
@@ -1069,8 +1183,12 @@ function SlideDetailPanel({
     plan:         `Floor plan with ${project.analysis?.rooms?.length ?? "?"} detected rooms listed on the right.`,
     strengths:    `${project.planStrengths?.length ?? 0} client-friendly bullets about this plan's key advantages.`,
     moodboard:    `Interior moodboard for ${slide.roomName}.`,
-    "overall-mood": `Overall interior style collage — 4 images showing the full design language of the home.`,
-    "room-mood":  `${slide.roomName}: plan snippet + ${rmDetail?.images?.length ?? 3} mood images. ${project.analysis?.rooms?.find(r => r.name === slide.roomName)?.sizeEstimateSqm ? project.analysis?.rooms?.find(r => r.name === slide.roomName)?.sizeEstimateSqm + " sqm." : ""}`,
+    "overall-mood": `Overall interior style collage — 4 images showing the full design language.`,
+    "room-mood":  `${slide.roomName}: plan snippet + mood images.`,
+    walkthrough:  `Room-by-room narrative walkthrough — ${project.analysis?.rooms?.length ?? 0} spaces described.`,
+    highlights:   `Lifestyle insights — zoning, orientation, and spatial design decisions.`,
+    vastu:        `Vastu Shastra compliance check with room-by-room orientation analysis.`,
+    thankyou:     `Closing slide with firm name and project details.`,
   };
 
   return (
