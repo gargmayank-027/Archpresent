@@ -205,7 +205,6 @@ export default function ExportPage() {
   const isReady = planStrengths.length > 0;
 
   // Build slide deck — mirrors PDF page order, branches on presentation type
-  const isConcept = project.presentationType === "concept";
 
   const slides: SlidePreview[] = [
     { type: "cover", label: "Cover", icon: "01" },
