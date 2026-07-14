@@ -3,7 +3,7 @@
  * GET — public, returns project data if token valid, increments view count
  */
 import { NextRequest, NextResponse } from "next/server";
-import { projectStore } from "@/lib/store";
+import { projectStore, firmStore } from "@/lib/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,9 +44,26 @@ export async function GET(
 
     console.log(`[share] Serving project: ${project.name} (${project.id.slice(0, 8)}…)`);
 
+    // Include firm contact info for CTA buttons on the share page
+    let firmPhone: string | undefined;
+    let firmEmail: string | undefined;
+    try {
+      const firm = await firmStore.get();
+      firmPhone = firm?.phone;
+      firmEmail = firm?.email;
+    } catch {}
+
     // Strip internal server paths before sending to client
-    const { planImagePath: _p, ...clientProject } = project as unknown as Record<string, unknown>;
-    void _p;
+    const clientProject = {
+      ...project,
+      planImagePath: undefined,
+      // Inject firm contact for share CTA
+      plotInfo: {
+        ...project.plotInfo,
+        phone: project.plotInfo?.phone ?? firmPhone,
+        email: project.plotInfo?.email ?? firmEmail,
+      },
+    };
 
     return NextResponse.json({ project: clientProject });
   } catch (err) {

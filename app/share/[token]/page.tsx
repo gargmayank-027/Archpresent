@@ -160,29 +160,58 @@ export default function SharePage() {
         )}
       </div>
 
+      {/* Bottom bar — progress + navigation + CTA */}
       <div className={`flex-shrink-0 transition-opacity duration-300 ${showNav ? "opacity-100" : "opacity-0"}`}>
+        {/* Progress bar */}
         <div className="h-0.5 bg-white/10">
-          <div className="h-full bg-white/50 transition-all duration-500"
+          <div className="h-full bg-white/50 transition-all duration-500 ease-out"
                style={{ width: `${((slide + 1) / slides.length) * 100}%` }} />
         </div>
-        <div className="bg-black/80 backdrop-blur-sm px-5 py-3 flex items-center gap-4">
+
+        <div className="bg-black/80 backdrop-blur-sm px-4 sm:px-5 py-3 flex items-center gap-3">
+          {/* Slide label */}
           <div className="flex-1 min-w-0 hidden sm:block">
-            <p className="text-xs text-white/40 truncate">{project.name}</p>
+            <p className="text-[10px] text-white/30 font-mono uppercase tracking-widest truncate">{current.label}</p>
+            <p className="text-xs text-white/50 truncate">{project.name} — {project.firmName}</p>
           </div>
-          <div className="flex items-center gap-3 mx-auto">
-            <button onClick={() => setSlide((s) => Math.max(s - 1, 0))} disabled={slide === 0}
-              className="text-white/50 hover:text-white disabled:opacity-20 transition-colors text-xl w-8 text-center">‹</button>
+
+          {/* Navigation */}
+          <div className="flex items-center gap-2 mx-auto sm:mx-0">
+            <button onClick={() => { setSlide((s) => Math.max(s - 1, 0)); resetTimer(); }} disabled={slide === 0}
+              className="text-white/50 hover:text-white disabled:opacity-20 transition-colors px-2 py-1">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
             <div className="flex items-center gap-1">
               {slides.map((_, i) => (
-                <button key={i} onClick={() => setSlide(i)}
-                  className={`rounded-full transition-all duration-300 ${i === slide ? "w-5 h-1.5 bg-white" : "w-1.5 h-1.5 bg-white/25 hover:bg-white/50"}`} />
+                <button key={i} onClick={() => { setSlide(i); resetTimer(); }}
+                  className={`rounded-full transition-all duration-300 ${i === slide ? "w-5 h-1.5 bg-white" : "w-1.5 h-1.5 bg-white/20 hover:bg-white/40"}`} />
               ))}
             </div>
-            <button onClick={() => setSlide((s) => Math.min(s + 1, slides.length - 1))} disabled={slide === slides.length - 1}
-              className="text-white/50 hover:text-white disabled:opacity-20 transition-colors text-xl w-8 text-center">›</button>
+            <button onClick={() => { setSlide((s) => Math.min(s + 1, slides.length - 1)); resetTimer(); }} disabled={slide === slides.length - 1}
+              className="text-white/50 hover:text-white disabled:opacity-20 transition-colors px-2 py-1">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
           </div>
-          <div className="flex-1 flex justify-end">
-            <span className="font-mono text-[10px] text-white/25">{slide + 1} / {slides.length}</span>
+
+          {/* CTA — on last slide or always visible on mobile */}
+          <div className="flex-1 flex justify-end gap-2">
+            {slide === slides.length - 1 && project.plotInfo?.phone ? (
+              <>
+                <a href={`tel:${project.plotInfo.phone}`}
+                  className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 rounded-full px-3 py-1.5 transition-colors">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+                  <span className="text-[9px] text-white/70 font-mono uppercase tracking-widest">Call</span>
+                </a>
+                <a href={`https://wa.me/${project.plotInfo.phone.replace(/[^0-9+]/g, "")}`}
+                  target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 bg-emerald-600/80 hover:bg-emerald-600 rounded-full px-3 py-1.5 transition-colors">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/></svg>
+                  <span className="text-[9px] text-white font-mono uppercase tracking-widest">WhatsApp</span>
+                </a>
+              </>
+            ) : (
+              <span className="font-mono text-[10px] text-white/20">{slide + 1}/{slides.length}</span>
+            )}
           </div>
         </div>
       </div>
@@ -593,18 +622,36 @@ function VastuSlide({ project: p }: { project: Project }) {
 
 // ─── Thank You ───────────────────────────────────────────────────────────────
 function ThankYouSlide({ project: p }: { project: Project }) {
+  const phone = (p as any).plotInfo?.phone;
   return (
     <div className="w-full h-full flex items-center justify-center" style={{ animation: "fadeIn .4s ease" }}>
       <div className="absolute inset-0 bg-[#1a1917]" />
-      <div className="relative text-center px-8">
-        <p className="font-mono text-[10px] tracking-[0.25em] text-amber-500/60 uppercase mb-4">{p.firmName}</p>
+      <div className="relative text-center px-8 max-w-lg">
+        <p className="font-mono text-[10px] tracking-[0.25em] text-amber-500/60 uppercase mb-6">{p.firmName}</p>
         <h2 className="text-3xl sm:text-5xl font-light text-white/90 mb-4" style={{ fontFamily: "'Cormorant Garamond', serif" }}>
           Thank you
         </h2>
         <p className="text-white/40 text-sm mb-8">
           We look forward to bringing {p.name} to life.
         </p>
-        <div className="flex items-center justify-center gap-6 text-white/25 text-xs font-mono">
+
+        {phone && (
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-8">
+            <a href={`tel:${phone}`}
+              className="flex items-center gap-2 bg-white/10 hover:bg-white/20 rounded-full px-6 py-3 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+              <span className="text-white/80 text-sm">Call Us</span>
+            </a>
+            <a href={`https://wa.me/${phone.replace(/[^0-9+]/g, "")}`}
+              target="_blank" rel="noreferrer"
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 rounded-full px-6 py-3 transition-colors">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/></svg>
+              <span className="text-white text-sm">WhatsApp Us</span>
+            </a>
+          </div>
+        )}
+
+        <div className="flex items-center justify-center gap-6 text-white/20 text-xs font-mono">
           {p.plotInfo?.city && <span>{p.plotInfo.city}{p.plotInfo.state ? `, ${p.plotInfo.state}` : ""}</span>}
           {p.clientName && <span>Prepared for {p.clientName}</span>}
         </div>
