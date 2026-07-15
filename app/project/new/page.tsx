@@ -44,10 +44,25 @@ export default function NewProjectPage() {
   const [country, setCountry] = useState("India");
 
   // ── Client brief ──────────────────────────────────────────────────────────
-  const [familyDetails, setFamilyDetails] = useState("");
-  const [lifestyle, setLifestyle]         = useState("");
-  const [priorities, setPriorities]       = useState("");
-  const [showVastu, setShowVastu]         = useState(false);
+  const [familySize, setFamilySize]         = useState<number>(0);
+  const [familyTags, setFamilyTags]         = useState<string[]>([]);
+  const [lifestyleTags, setLifestyleTags]   = useState<string[]>([]);
+  const [priorityTags, setPriorityTags]     = useState<string[]>([]);
+  const [showVastu, setShowVastu]           = useState(false);
+  const [additionalBrief, setAdditionalBrief] = useState("");
+
+  function toggleTag(arr: string[], setArr: (v: string[]) => void, tag: string) {
+    setArr(arr.includes(tag) ? arr.filter(t => t !== tag) : [...arr, tag]);
+  }
+
+  // Build brief strings from tags for submission
+  const familyDetails = [
+    familySize ? `Family of ${familySize}` : "",
+    ...familyTags,
+  ].filter(Boolean).join(", ");
+
+  const lifestyle = lifestyleTags.join(", ");
+  const priorities = priorityTags.join(", ");
 
   // ── Plot / site info ───────────────────────────────────────────────────────
   const [plotAreaSqm, setPlotAreaSqm]           = useState("");
@@ -169,6 +184,7 @@ export default function NewProjectPage() {
       if (familyDetails.trim()) fd.append("familyDetails", familyDetails.trim());
       if (lifestyle.trim())   fd.append("lifestyle",      lifestyle.trim());
       if (priorities.trim())  fd.append("priorities",     priorities.trim());
+      if (additionalBrief.trim()) fd.append("additionalNotes", additionalBrief.trim());
       if (showVastu)          fd.append("showVastu",      "true");
       if (plotAreaSqm)      fd.append("plotAreaSqm",      plotAreaSqm);
       if (builtUpAreaSqm)   fd.append("builtUpAreaSqm",   builtUpAreaSqm);
@@ -360,31 +376,93 @@ export default function NewProjectPage() {
                   Tell us about the client — this personalises the presentation.
                 </p>
               </div>
+
+              {/* Family size */}
               <div>
-                <label className="field-label">Family / Residents</label>
-                <input className="field-input" type="text"
-                  placeholder="e.g. Couple, 2 school-age kids, elderly mother"
-                  value={familyDetails} onChange={(e) => setFamilyDetails(e.target.value)} />
+                <label className="field-label">Family Size</label>
+                <div className="flex gap-2 flex-wrap">
+                  {[2, 3, 4, 5, 6, 7].map(n => (
+                    <button key={n} type="button" onClick={() => setFamilySize(familySize === n ? 0 : n)}
+                      className={`px-4 py-2 rounded-sm border text-sm transition-all ${
+                        familySize === n
+                          ? "bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-900 dark:border-stone-100"
+                          : "border-stone-200 text-stone-600 hover:border-stone-400"
+                      }`}>
+                      {n} {n === 7 ? "+" : ""}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Family composition */}
               <div>
-                <label className="field-label">Lifestyle Notes</label>
-                <input className="field-input" type="text"
-                  placeholder="e.g. Works from home, loves cooking, hosts often"
-                  value={lifestyle} onChange={(e) => setLifestyle(e.target.value)} />
+                <label className="field-label">Who lives here?</label>
+                <div className="flex gap-2 flex-wrap">
+                  {["Young kids", "Teenagers", "Elderly parents", "Live-in help", "Pets", "Guests often"].map(tag => (
+                    <button key={tag} type="button" onClick={() => toggleTag(familyTags, setFamilyTags, tag)}
+                      className={`px-3 py-1.5 rounded-full text-xs border transition-all ${
+                        familyTags.includes(tag)
+                          ? "bg-amber-100 border-amber-300 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-300"
+                          : "border-stone-200 text-stone-500 hover:border-stone-400"
+                      }`}>
+                      {familyTags.includes(tag) ? "✓ " : ""}{tag}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Lifestyle */}
               <div>
-                <label className="field-label">Client Priorities</label>
-                <input className="field-input" type="text"
-                  placeholder="e.g. Privacy, natural light, low maintenance, Vastu"
-                  value={priorities} onChange={(e) => setPriorities(e.target.value)} />
+                <label className="field-label">Lifestyle</label>
+                <div className="flex gap-2 flex-wrap">
+                  {["Works from home", "Loves cooking", "Hosts often", "Fitness/Yoga", "Gardening", "Reading/Study", "Movie nights", "Joint family meals"].map(tag => (
+                    <button key={tag} type="button" onClick={() => toggleTag(lifestyleTags, setLifestyleTags, tag)}
+                      className={`px-3 py-1.5 rounded-full text-xs border transition-all ${
+                        lifestyleTags.includes(tag)
+                          ? "bg-amber-100 border-amber-300 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-300"
+                          : "border-stone-200 text-stone-500 hover:border-stone-400"
+                      }`}>
+                      {lifestyleTags.includes(tag) ? "✓ " : ""}{tag}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {/* Priorities */}
+              <div>
+                <label className="field-label">What matters most?</label>
+                <div className="flex gap-2 flex-wrap">
+                  {["Privacy", "Natural light", "Open plan", "Low maintenance", "Large kitchen", "Outdoor space", "Car parking", "Future expansion", "Separate entry"].map(tag => (
+                    <button key={tag} type="button" onClick={() => toggleTag(priorityTags, setPriorityTags, tag)}
+                      className={`px-3 py-1.5 rounded-full text-xs border transition-all ${
+                        priorityTags.includes(tag)
+                          ? "bg-amber-100 border-amber-300 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-300"
+                          : "border-stone-200 text-stone-500 hover:border-stone-400"
+                      }`}>
+                      {priorityTags.includes(tag) ? "✓ " : ""}{tag}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Vastu toggle */}
               <div className="flex items-center gap-3">
-                <input type="checkbox" id="showVastu" checked={showVastu}
-                  onChange={(e) => setShowVastu(e.target.checked)}
-                  className="w-4 h-4 rounded border-stone-300" />
-                <label htmlFor="showVastu" className="text-sm text-stone-600">
-                  Include Vastu compliance analysis
-                </label>
+                <button type="button" onClick={() => setShowVastu(!showVastu)}
+                  className={`px-4 py-2 rounded-sm border text-sm transition-all flex items-center gap-2 ${
+                    showVastu
+                      ? "bg-amber-100 border-amber-300 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-300"
+                      : "border-stone-200 text-stone-500 hover:border-stone-400"
+                  }`}>
+                  {showVastu ? "✓" : "○"} Vastu compliance analysis
+                </button>
+              </div>
+
+              {/* Additional notes */}
+              <div>
+                <label className="field-label">Anything else? <span className="text-stone-400 font-normal">(optional)</span></label>
+                <input className="field-input" type="text"
+                  placeholder="e.g. Corner plot, wants a basement, prefers marble flooring"
+                  value={additionalBrief} onChange={(e) => setAdditionalBrief(e.target.value)} />
               </div>
             </>
           )}
@@ -405,23 +483,39 @@ export default function NewProjectPage() {
             </div>
           </div>
 
-          {/* Property type + bedrooms */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="field-label">Property Type</label>
-              <select className="field-input"
-                value={propertyType} onChange={(e) => setPropertyType(e.target.value as PropertyType)}>
-                <option value="">Select…</option>
-                {PROPERTY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
+          {/* Property type */}
+          <div>
+            <label className="field-label">Property Type</label>
+            <div className="flex gap-2 flex-wrap mt-1">
+              {PROPERTY_TYPES.map((t) => (
+                <button key={t} type="button"
+                  onClick={() => setPropertyType(propertyType === t ? "" as PropertyType : t)}
+                  className={`px-3 py-2 rounded-sm border text-xs transition-all ${
+                    propertyType === t
+                      ? "bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-900 dark:border-stone-100"
+                      : "border-stone-200 text-stone-600 hover:border-stone-400"
+                  }`}>
+                  {t}
+                </button>
+              ))}
             </div>
-            <div>
-              <label className="field-label">No. of Bedrooms (BHK)</label>
-              <select className="field-input"
-                value={numberOfBedrooms} onChange={(e) => setNumberOfBedrooms(e.target.value)}>
-                <option value="">Select…</option>
-                {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} BHK</option>)}
-              </select>
+          </div>
+
+          {/* Bedrooms */}
+          <div>
+            <label className="field-label">Bedrooms (BHK)</label>
+            <div className="flex gap-2 mt-1">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} type="button"
+                  onClick={() => setNumberOfBedrooms(numberOfBedrooms === String(n) ? "" : String(n))}
+                  className={`w-14 py-2 rounded-sm border text-sm text-center transition-all ${
+                    numberOfBedrooms === String(n)
+                      ? "bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-900 dark:border-stone-100"
+                      : "border-stone-200 text-stone-600 hover:border-stone-400"
+                  }`}>
+                  {n}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -434,7 +528,7 @@ export default function NewProjectPage() {
                   onClick={() => setFacing(facing === f ? "" : f)}
                   className={`py-2 px-1 text-center border rounded-sm transition-all font-mono text-[10px] uppercase tracking-wider
                     ${facing === f
-                      ? "border-stone-900 bg-white text-stone-900"
+                      ? "bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-900 dark:border-stone-100"
                       : "border-stone-200 text-stone-400 hover:border-stone-400 hover:text-stone-700"}`}>
                   {f}
                 </button>
@@ -443,15 +537,23 @@ export default function NewProjectPage() {
           </div>
 
           {/* Floor location (show only for apartments/penthouse) */}
-          {(propertyType === "Apartment" || propertyType === "Penthouse" || propertyType === "") && (
+          {(propertyType === "Apartment" || propertyType === "Penthouse") && (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="field-label">Floor Location</label>
-                <select className="field-input"
-                  value={floorLocation} onChange={(e) => setFloorLocation(e.target.value as FloorLocation)}>
-                  <option value="">Select…</option>
-                  {FLOOR_LOCATIONS.map((f) => <option key={f} value={f}>{f} floor</option>)}
-                </select>
+                <div className="flex gap-2 flex-wrap mt-1">
+                  {FLOOR_LOCATIONS.map((f) => (
+                    <button key={f} type="button"
+                      onClick={() => setFloorLocation(floorLocation === f ? "" as FloorLocation : f)}
+                      className={`px-3 py-1.5 rounded-sm border text-xs transition-all ${
+                        floorLocation === f
+                          ? "bg-stone-900 text-white border-stone-900 dark:bg-stone-100 dark:text-stone-900 dark:border-stone-100"
+                          : "border-stone-200 text-stone-500 hover:border-stone-400"
+                      }`}>
+                      {f}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div>
                 <label className="field-label">Floors in Building</label>
