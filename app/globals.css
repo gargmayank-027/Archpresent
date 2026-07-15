@@ -30,6 +30,25 @@
   --transition-slow: 0.35s cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* ── Dark mode tokens ──────────────────────────────────────────────────── */
+.dark {
+  --c-bg: #141312;
+  --c-ink: #e8e3dc;
+  --c-muted: #8a857e;
+  --c-border: #2d2a27;
+  --c-accent: #e8e3dc;
+  --c-amber: #d99f1e;
+  --c-surface: #1c1b19;
+  --c-hover: #242220;
+  --c-active: #2d2a27;
+  --c-focus-ring: rgba(217, 159, 30, 0.35);
+  --c-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --c-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --c-shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2);
+  --c-shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25);
+  color-scheme: dark;
+}
+
 /* ── Base ───────────────────────────────────────────────────────────────── */
 body {
   font-family: var(--font-sans);
@@ -602,3 +621,97 @@ a.card:active, button.card:active {
 .app-page {
   padding-top: 3.5rem; /* 56px = navbar height */
 }
+
+/* ── Dark mode global overrides ────────────────────────────────────────── */
+/* These override Tailwind utility colors globally when .dark is on <html>.
+   No need to add dark: prefix to every component — these catch them all. */
+
+/* Backgrounds */
+.dark .bg-stone-50, .dark .bg-stone-100 { background-color: var(--c-bg) !important; }
+.dark .bg-white { background-color: var(--c-surface) !important; }
+.dark .bg-white\/50, .dark .bg-white\/80, .dark .bg-white\/85 { background-color: rgba(28, 27, 25, 0.85) !important; }
+.dark .bg-stone-200\/60 { background-color: rgba(45, 42, 39, 0.6) !important; }
+.dark .bg-stone-900 { background-color: #e8e3dc !important; color: #141312 !important; }
+
+/* Text */
+.dark .text-stone-900 { color: #e8e3dc !important; }
+.dark .text-stone-800 { color: #d4cfc8 !important; }
+.dark .text-stone-700 { color: #b0a99f !important; }
+.dark .text-stone-600 { color: #8a857e !important; }
+.dark .text-stone-500 { color: #7a7570 !important; }
+.dark .text-stone-400 { color: #6b665f !important; }
+.dark .text-stone-300 { color: #4d4843 !important; }
+
+/* Borders */
+.dark .border-stone-200, .dark .border-stone-200\/70 { border-color: var(--c-border) !important; }
+.dark .border-stone-100 { border-color: #232120 !important; }
+.dark .border-stone-300 { border-color: #3d3a36 !important; }
+
+/* Cards & surfaces */
+.dark .card { background-color: var(--c-surface) !important; border-color: var(--c-border) !important; }
+
+/* Inputs */
+.dark .field-input {
+  background-color: var(--c-bg) !important;
+  border-color: var(--c-border) !important;
+  color: var(--c-ink) !important;
+}
+.dark .field-input::placeholder { color: #5c5650 !important; }
+.dark .field-input:focus { border-color: var(--c-amber) !important; }
+
+/* Buttons */
+.dark .btn-primary {
+  background-color: #e8e3dc !important;
+  color: #141312 !important;
+}
+.dark .btn-primary:hover { background-color: #d4cfc8 !important; }
+.dark .btn-secondary {
+  border-color: var(--c-border) !important;
+  color: var(--c-ink) !important;
+}
+.dark .btn-secondary:hover { background-color: var(--c-hover) !important; }
+.dark .btn-ghost { color: #8a857e !important; }
+.dark .btn-ghost:hover { color: #d4cfc8 !important; }
+
+/* Alerts */
+.dark .alert-error { background-color: #2a1515 !important; border-color: #4a2020 !important; color: #f5a0a0 !important; }
+.dark .alert-success { background-color: #152a15 !important; border-color: #204a20 !important; color: #a0f5a0 !important; }
+
+/* Navbar */
+.dark .backdrop-blur-md { background-color: rgba(20, 19, 18, 0.85) !important; }
+.dark .backdrop-saturate-150 { backdrop-filter: blur(12px) saturate(150%) !important; }
+
+/* Specific component overrides */
+.dark .bg-amber-50 { background-color: #2a2415 !important; }
+.dark .border-amber-200 { border-color: #4a3e20 !important; }
+.dark .text-amber-800 { color: #d99f1e !important; }
+.dark .text-amber-700 { color: #c47b2a !important; }
+.dark .text-amber-600 { color: #d99f1e !important; }
+.dark .bg-amber-100 { background-color: #2a2415 !important; }
+.dark .bg-amber-500 { background-color: #d99f1e !important; }
+
+.dark .bg-emerald-100 { background-color: #15291a !important; }
+.dark .border-emerald-300 { border-color: #1a4a25 !important; }
+.dark .text-emerald-700 { color: #6ee7b7 !important; }
+
+.dark .bg-violet-100 { background-color: #1f152a !important; }
+.dark .border-violet-300 { border-color: #35204a !important; }
+.dark .text-violet-700 { color: #a78bfa !important; }
+
+.dark .bg-blue-50 { background-color: #151a2a !important; }
+.dark .border-blue-200 { border-color: #20304a !important; }
+.dark .text-blue-600 { color: #60a5fa !important; }
+
+/* Shadows in dark mode */
+.dark [style*="box-shadow"] { --tw-shadow-color: rgba(0, 0, 0, 0.3) !important; }
+
+/* Scrollbar */
+.dark ::-webkit-scrollbar-track { background: var(--c-bg); }
+.dark ::-webkit-scrollbar-thumb { background: #3d3a36; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #4d4843; }
+
+/* Landing page dark overrides */
+.dark .bg-stone-900.text-white { background-color: #0d0d0c !important; }
+
+/* Spinner */
+.dark .spinner { border-color: #3d3a36 !important; border-top-color: #8a857e !important; }

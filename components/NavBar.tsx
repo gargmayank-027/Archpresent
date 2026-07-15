@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
+import { ThemeToggle } from "./ThemeToggle";
 import type { FirmProfile } from "@/types";
 
 export function NavBar() {
@@ -76,7 +77,8 @@ export function NavBar() {
             ))}
           </nav>
 
-          {/* User avatar / sign out */}
+          {/* Theme toggle + user avatar */}
+          <ThemeToggle />
           {session?.user && (
             <div className="relative ml-3">
               <button type="button"

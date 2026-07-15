@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function LandingPage() {
   const { data: session, status } = useSession();
@@ -35,6 +36,7 @@ export default function LandingPage() {
               style={{ fontFamily: "'Cormorant Garamond', serif" }}>Present</span>
           </a>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Link href="/login"
               className="px-4 py-1.5 font-mono text-[10px] tracking-widest uppercase text-stone-500 hover:text-stone-800 transition-colors">
               Log in
