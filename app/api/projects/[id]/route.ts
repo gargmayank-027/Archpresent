@@ -58,7 +58,7 @@ export async function PATCH(
     }
 
     // General field updates (theme, name, etc.)
-    const allowedFields = ["presentationTheme", "name", "clientName"];
+    const allowedFields = ["presentationTheme", "name", "clientName", "roomNarratives", "editedStrengths"];
     const patch: Record<string, unknown> = {};
     for (const field of allowedFields) {
       if (body[field] !== undefined) patch[field] = body[field];

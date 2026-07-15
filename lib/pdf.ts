@@ -1133,8 +1133,8 @@ async function addRoomWalkthroughSlide(
     });
     y -= lineH;
 
-    // Build a narrative description from the room data
-    const desc = buildRoomNarrative(room, project.plotInfo);
+    // Use architect-edited narrative if available, otherwise auto-generate
+    const desc = project.roomNarratives?.[room.name] ?? buildRoomNarrative(room, project.plotInfo);
     const lines = wrapText(desc, font, 8.5, colW - 10);
 
     for (const line of lines.slice(0, 4)) { // max 4 lines per room
@@ -1172,7 +1172,7 @@ async function addRoomWalkthroughSlide(
  * Build a short narrative description of a room for the client walkthrough.
  * Written in second person, varied per room type, avoiding generic filler.
  */
-function buildRoomNarrative(room: import("@/types").RoomDetail, plotInfo?: import("@/types").PlotInfo): string {
+export function buildRoomNarrative(room: import("@/types").RoomDetail, plotInfo?: import("@/types").PlotInfo): string {
   const name = room.name.toLowerCase();
   const sqm = room.sizeEstimateSqm;
   const orient = (room.orientation ?? "").toLowerCase();

@@ -87,6 +87,13 @@ export interface Project {
 
   // Presentation visual theme
   presentationTheme?: "classic" | "dark" | "minimal" | "warm";
+
+  // Editable room narratives for the walkthrough slide
+  // Keys are room names, values are the architect-edited narrative text
+  roomNarratives?: Record<string, string>;
+
+  // Plan strengths can be edited too
+  editedStrengths?: string[];
 }
 
 export interface RoomSummary {

@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
 import { FloodFillRenderer } from "@/components/FloodFillRenderer";
+import { NarrativePreview } from "@/components/NarrativePreview";
 import type { Project, PlanAnalysis, PlotInfo } from "@/types";
 
 export default function ReviewPage() {
@@ -558,6 +559,25 @@ export default function ReviewPage() {
                 onRegenerate={runAnalysis}
                 onChange={setStrengths}
               />
+
+              {/* ── Presentation narrative preview (concept only) ──────────── */}
+              {isConcept && analysis?.rooms?.length > 0 && (
+                <NarrativePreview
+                  rooms={analysis.rooms}
+                  plotInfo={project.plotInfo}
+                  savedNarratives={project.roomNarratives ?? {}}
+                  onSave={async (narratives) => {
+                    try {
+                      await fetch(`/api/projects/${id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ roomNarratives: narratives }),
+                      });
+                      setProject(p => p ? { ...p, roomNarratives: narratives } : p);
+                    } catch {}
+                  }}
+                />
+              )}
               {/* Inline error */}
               {error && (
                 <div className="border border-red-200 bg-red-50 rounded-sm px-3 py-2.5 flex items-start gap-2">
