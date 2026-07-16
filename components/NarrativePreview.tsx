@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { buildRoomNarrative } from "@/lib/pdf";
+import { buildRoomNarrative } from "@/lib/narrative";
 import type { RoomDetail, PlotInfo } from "@/types";
 
 interface Props {
