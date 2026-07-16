@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    const pdfBuffer = await buildProjectPdf(project);
+    const { bytes: pdfBuffer } = await buildProjectPdf(project);
 
     const slug = project.name
       .toLowerCase()

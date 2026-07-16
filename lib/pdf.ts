@@ -73,7 +73,21 @@ const ON_IMAGE_MUTED = rgb(0.74, 0.74, 0.72);
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export async function buildProjectPdf(project: Project): Promise<Buffer> {
+/**
+ * Result of a deck build.
+ *
+ * `pageLabels` is emitted BY the builder, one entry per page actually added,
+ * so callers never have to maintain a parallel guess at the deck's structure.
+ * The Export screen used to keep its own hand-written `slides` array and index
+ * page images against it — which silently dropped the Thank You slide and
+ * mislabelled every page after the walkthrough once that started paginating.
+ */
+export interface DeckBuild {
+  bytes: Buffer;
+  pageLabels: string[];
+}
+
+export async function buildProjectPdf(project: Project): Promise<DeckBuild> {
   const firm   = await firmStore.get();
   const accent = ACCENT_COLORS[firm?.accentColor ?? "graphite"];
 
@@ -82,6 +96,9 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
   // serverless process can't clobber each other's theme mid-render.
   const t = getPdfTheme(project.presentationTheme);
 
+  // Labels are recorded as each page is added, keyed off the page object, so
+  // the order can never disagree with the document.
+  const labels = new Map<PDFPage, string>();
   const doc    = await PDFDocument.create();
   const reg    = await doc.embedFont(StandardFonts.Helvetica);
   const bold   = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -104,71 +121,83 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
     } catch { /* logo failed — skip gracefully */ }
   }
 
+  // Wrap each section so it labels whatever pages it produced. A section may
+  // add more than one page (the walkthrough paginates), so labels are derived
+  // from the document itself rather than assumed 1:1.
+  async function section(label: string, fn: () => Promise<void>) {
+    const before = doc.getPageCount();
+    await fn();
+    const added = doc.getPageCount() - before;
+    for (let i = 0; i < added; i++) {
+      labels.set(doc.getPage(before + i), added > 1 ? `${label} ${i + 1}/${added}` : label);
+    }
+  }
+
   if (project.presentationType === "concept") {
     // ── CONCEPT PRESENTATION ──────────────────────────────────────────
     console.log(`[pdf] Building concept deck: ${project.name} (theme: ${t.id})`);
     console.log(`[pdf] Plan: ${(project.aiRenderedPlanUrl ?? project.renderedPlanUrl ?? project.planImagePath ?? "none").slice(0, 80)}`);
     // First-meeting deck: spatial storytelling, no moodboards
-    await addCoverSlide(doc, project, firm, accent, t, reg, bold, italic, logoBytes, logoIsPng);
+    await section("Cover", () => addCoverSlide(doc, project, firm, accent, t, reg, bold, italic, logoBytes, logoIsPng));
 
     if (project.plotInfo && Object.keys(project.plotInfo).length > 0) {
-      await addSiteContextSlide(doc, project, accent, t, reg, bold);
+      await section("Site Context", () => addSiteContextSlide(doc, project, accent, t, reg, bold));
     }
 
-    await addPlanSlide(doc, project, accent, t, reg, bold);
+    await section("Floor Plan", () => addPlanSlide(doc, project, accent, t, reg, bold));
 
     if ((project.planStrengths ?? []).length > 0) {
-      await addStrengthsSlide(doc, project, project.planStrengths!, accent, t, reg, bold);
+      await section("Plan Strengths", () => addStrengthsSlide(doc, project, project.planStrengths!, accent, t, reg, bold));
     }
 
     // Room-by-room narrative walkthrough — paginates across as many slides
     // as the rooms need.
     if (project.analysis?.rooms?.length) {
-      await addRoomWalkthroughSlide(doc, project, accent, t, reg, bold, italic);
+      await section("Room Walkthrough", () => addRoomWalkthroughSlide(doc, project, accent, t, reg, bold, italic));
     }
 
     // Lifestyle insights tied back to the client brief
     if (project.analysis?.rooms?.length) {
-      await addSpatialHighlightsSlide(doc, project, accent, t, reg, bold, italic);
+      await section("Why This Works", () => addSpatialHighlightsSlide(doc, project, accent, t, reg, bold, italic));
     }
 
     // Vastu compliance check (only if client opted in)
     if (project.plotInfo?.showVastu && project.plotInfo?.facing && project.analysis?.rooms?.length) {
-      await addVastuSlide(doc, project, accent, t, reg, bold, italic);
+      await section("Vastu Analysis", () => addVastuSlide(doc, project, accent, t, reg, bold, italic));
     }
 
-    await addThankYouSlide(doc, project, firm, accent, t, reg, bold, italic);
+    await section("Thank You", () => addThankYouSlide(doc, project, firm, accent, t, reg, bold, italic));
 
   } else {
     // ── INTERIOR PRESENTATION ─────────────────────────────────────────
     // Design-phase deck: moodboards for every room
-    await addCoverSlide(doc, project, firm, accent, t, reg, bold, italic, logoBytes, logoIsPng);
+    await section("Cover", () => addCoverSlide(doc, project, firm, accent, t, reg, bold, italic, logoBytes, logoIsPng));
 
     if (project.plotInfo && Object.keys(project.plotInfo).length > 0) {
-      await addSiteContextSlide(doc, project, accent, t, reg, bold);
+      await section("Site Context", () => addSiteContextSlide(doc, project, accent, t, reg, bold));
     }
 
-    await addPlanSlide(doc, project, accent, t, reg, bold);
+    await section("Floor Plan", () => addPlanSlide(doc, project, accent, t, reg, bold));
 
     if ((project.planStrengths ?? []).length > 0) {
-      await addStrengthsSlide(doc, project, project.planStrengths!, accent, t, reg, bold);
+      await section("Plan Strengths", () => addStrengthsSlide(doc, project, project.planStrengths!, accent, t, reg, bold));
     }
 
     if (project.overallMoodboard) {
-      await addOverallMoodboardSlide(doc, project.overallMoodboard, project, accent, t, reg, bold, italic);
+      await section("Interior Style", () => addOverallMoodboardSlide(doc, project.overallMoodboard!, project, accent, t, reg, bold, italic));
     }
 
     if (project.roomMoodboards && project.roomMoodboards.length > 0) {
       for (const rm of project.roomMoodboards) {
-        await addRoomMoodboardSlide(doc, rm, project, accent, t, reg, bold);
+        await section(rm.roomName, () => addRoomMoodboardSlide(doc, rm, project, accent, t, reg, bold));
       }
     } else {
       for (const mb of project.moodboards ?? []) {
-        await addMoodboardSlide(doc, mb, accent, t, reg, bold);
+        await section(mb.roomName, () => addMoodboardSlide(doc, mb, accent, t, reg, bold));
       }
     }
 
-    await addThankYouSlide(doc, project, firm, accent, t, reg, bold, italic);
+    await section("Thank You", () => addThankYouSlide(doc, project, firm, accent, t, reg, bold, italic));
   }
 
   // Footer on all pages except the cover (page 1) and the closing slide,
@@ -178,7 +207,8 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
     addSlideFooter(pages[i], reg, bold, i + 1, pages.length, firm, accent, t, FEATURE_PAGES.has(pages[i]));
   }
 
-  return Buffer.from(await doc.save());
+  const pageLabels = doc.getPages().map((pg, i) => labels.get(pg) ?? `Page ${i + 1}`);
+  return { bytes: Buffer.from(await doc.save()), pageLabels };
 }
 
 // NOTE: server-side rasterisation (sharp) used to live here, to turn the
@@ -658,7 +688,8 @@ async function addPlanSlide(
       x: rx, y: M + 26, size: ts(t, 8.5), font, color: mutedCol,
     });
     page.drawText(`${project.analysis.totalAreaSqm} m²`, {
-      x: rx, y: M + 4, size: ts(t, 18), font: bold, color: accent,
+      x: rx, y: M + 4, size: ts(t, 18), font: bold,
+      color: readableAccent(accent, t.featureBg, t.onFeature),
     });
   }
 }
@@ -1162,6 +1193,31 @@ function isDarkSurface(c: RGB): boolean {
   return 0.299 * c.red + 0.587 * c.green + 0.114 * c.blue < 0.5;
 }
 
+/** WCAG relative luminance. */
+function luminance(c: RGB): number {
+  const f = (v: number) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * f(c.red) + 0.7152 * f(c.green) + 0.0722 * f(c.blue);
+}
+
+/** WCAG contrast ratio between two colours (1 = identical, 21 = black/white). */
+function contrastRatio(a: RGB, b: RGB): number {
+  const la = luminance(a), lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/**
+ * Use the firm's accent only where it's actually legible against the surface,
+ * otherwise fall back to a colour that is.
+ *
+ * The default accent is graphite (#2d2b27). Drawn on the near-black feature
+ * surface (#1e1c1a) that's a contrast ratio of about 1.1 — invisible. This bit
+ * the page footer and the "TOTAL AREA" figure on the floor plan slide, both of
+ * which simply disappeared for any firm on the default accent.
+ */
+function readableAccent(accent: RGB, bg: RGB, fallback: RGB): RGB {
+  return contrastRatio(accent, bg) >= 3 ? accent : fallback;
+}
+
 /**
  * Paint the slide background + optional top accent bar.
  *
@@ -1456,24 +1512,28 @@ function drawPlanSnippet(
 
   drawClippedImage(page, img, { x: dx, y: dy, width: dw, height: dh }, thumb);
 
-  // Outline the room itself. The crop deliberately includes neighbouring
-  // spaces for context, and on a real plan — black lines on white, no colour
-  // coding — a square containing three rooms doesn't tell the client which one
-  // we mean. The outline does. Clipped to the thumb so it can't spill.
+  // Mark the room. The crop deliberately includes neighbouring spaces for
+  // context, and on a real plan — black linework on white — the client can't
+  // otherwise tell which one we mean.
+  //
+  // A wash plus an outline, not an outline alone: a thin stroke in the firm's
+  // accent looks like more plan linework, and the default accent is graphite,
+  // which is very nearly the same colour as the drawing itself. An area wash
+  // reads as a highlight regardless of how dark or desaturated the accent is.
   page.pushOperators(
     pushGraphicsState(),
     rectangle(thumb.x, thumb.y, thumb.width, thumb.height),
     clip(),
     endPath(),
   );
-  page.drawRectangle({
+  const mark = {
     x: dx + bx * dw,
     y: dy + (1 - by - bh) * dh,
     width: bw * dw,
     height: bh * dh,
-    borderColor: accent,
-    borderWidth: 1.5,
-  });
+  };
+  page.drawRectangle({ ...mark, color: accent, opacity: 0.22 });
+  page.drawRectangle({ ...mark, borderColor: accent, borderWidth: 1.5 });
   page.pushOperators(popGraphicsState());
 
   // Hairline keeps the white plate from bleeding into the card on light themes.

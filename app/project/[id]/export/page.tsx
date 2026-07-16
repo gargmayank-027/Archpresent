@@ -26,6 +26,7 @@ export default function ExportPage() {
   const [previewLoading, setPreviewLoading] = useState(true);
   const [previewError,   setPreviewError]   = useState(false);
   const [themeSaving,    setThemeSaving]    = useState(false);
+  const [pageLabels,     setPageLabels]     = useState<string[] | null>(null);
 
   // Share link state
   const [shareUrl,     setShareUrl]     = useState<string | null>(null);
@@ -85,6 +86,14 @@ export default function ExportPage() {
     try {
       const res = await fetch(`/api/export/preview?projectId=${id}`, { cache: "no-store" });
       if (!res.ok) throw new Error("preview fetch failed");
+
+      // Labels come from the PDF builder itself — one per real page — so the
+      // filmstrip can never drift from the document again.
+      try {
+        const raw = res.headers.get("X-Deck-Page-Labels");
+        if (raw) setPageLabels(JSON.parse(decodeURIComponent(raw)));
+      } catch { setPageLabels(null); }
+
       const bytes = await res.arrayBuffer();
       setPdfBytes(bytes);
 
@@ -297,6 +306,19 @@ export default function ExportPage() {
     { type: "thankyou" as const, label: "Thank You", icon: "" },
   ];
 
+  // What the filmstrip actually shows.
+  //
+  // Derived from the labels the PDF builder emitted — one entry per real page —
+  // so it can never drift from the document. The `slides` array above is now
+  // only a pre-load placeholder: it had no Thank You entry and assumed one page
+  // per section, so it dropped the closing slide and mislabelled everything
+  // after the walkthrough began paginating.
+  const previewItems: { label: string; fromPdf: boolean }[] =
+    pageLabels && pageLabels.length > 0
+      ? pageLabels.map((label) => ({ label, fromPdf: true }))
+      : slides.map((sl) => ({ label: sl.label, fromPdf: false }));
+
+
   return (
     <div className="max-w-6xl mx-auto px-6 py-12">
 
@@ -399,10 +421,10 @@ export default function ExportPage() {
         {/* Slide filmstrip — left column */}
         <div className="lg:col-span-1 space-y-2">
           <p className="font-mono text-[10px] uppercase tracking-widest text-stone-400 mb-3">
-            Slides ({slides.length})
+            Slides ({previewItems.length})
           </p>
           <div className="space-y-1.5 filmstrip pr-1">
-            {slides.map((slide, i) => (
+            {previewItems.map((slide, i) => (
               <button key={i} type="button"
                 onClick={() => setActiveSlide(i)}
                 className={`w-full text-left group transition-all ${
@@ -415,9 +437,13 @@ export default function ExportPage() {
                   {pageImages?.[i] ? (
                     <img src={pageImages[i]} alt={slide.label}
                       className="absolute inset-0 w-full h-full object-cover" />
-                  ) : (
-                    <SlideThumbnail slide={slide} project={project} />
-                  )}
+                  ) : slide.fromPdf ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="spinner w-3 h-3" style={{ borderWidth: 1 }} />
+                    </div>
+                  ) : slides[i] ? (
+                    <SlideThumbnail slide={slides[i]} project={project} />
+                  ) : null}
                 </div>
                 <div className="flex items-center justify-between px-1 py-1">
                   <span className={`font-mono text-[9px] uppercase tracking-wider truncate ${
@@ -440,8 +466,12 @@ export default function ExportPage() {
                 <span className="spinner" />
               </div>
             ) : pageImages?.[activeSlide] ? (
-              <img src={pageImages[activeSlide]} alt={slides[activeSlide]?.label}
+              <img src={pageImages[activeSlide]} alt={previewItems[activeSlide]?.label}
                 className="absolute inset-0 w-full h-full object-contain" />
+            ) : previewItems[activeSlide]?.fromPdf ? (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="spinner" />
+              </div>
             ) : (
               <SlidePreviewLarge slide={slides[activeSlide]} project={project} />
             )}
@@ -472,8 +502,13 @@ export default function ExportPage() {
             </button>
           </div>
 
-          {/* Slide detail panel */}
-          <SlideDetailPanel slide={slides[activeSlide]} project={project} slideIndex={activeSlide} />
+          {/* Slide detail panel. The filmstrip is driven by real PDF pages,
+              which can outnumber the legacy `slides` array (it has no Thank You
+              entry and assumes one page per section), so this is only rendered
+              when there's a matching descriptor. */}
+          {slides[activeSlide] && (
+            <SlideDetailPanel slide={slides[activeSlide]} project={project} slideIndex={activeSlide} />
+          )}
         </div>
       </div>
 

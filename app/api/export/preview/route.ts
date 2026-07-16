@@ -37,12 +37,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    const pdfBuffer = await buildProjectPdf(project);
+    const { bytes: pdfBuffer, pageLabels } = await buildProjectPdf(project);
 
     return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
+        // Labels emitted by the builder itself, one per actual page. The
+        // Export screen used to keep its own parallel `slides` array and index
+        // page images against it — which dropped the Thank You page entirely
+        // and mislabelled everything after the walkthrough once that started
+        // paginating. Shipped as a header to avoid a second round trip.
+        "X-Deck-Page-Labels": encodeURIComponent(JSON.stringify(pageLabels)),
+        "Access-Control-Expose-Headers": "X-Deck-Page-Labels",
         "Content-Disposition": "inline",
         "Content-Length": String(pdfBuffer.byteLength),
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",

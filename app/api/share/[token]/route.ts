@@ -57,15 +57,15 @@ export async function GET(
     const clientProject = {
       ...project,
       planImagePath: undefined,
-      // Inject firm contact for share CTA
-      plotInfo: {
-        ...project.plotInfo,
-        phone: project.plotInfo?.phone ?? firmPhone,
-        email: project.plotInfo?.email ?? firmEmail,
-      },
     };
 
-    return NextResponse.json({ project: clientProject });
+    // Firm contact is returned as its own field rather than smuggled into
+    // plotInfo. The old version assigned `phone`/`email` onto plotInfo, which
+    // has no such fields — five type errors that only shipped because
+    // next.config.js sets ignoreBuildErrors.
+    const firmContact = { phone: firmPhone, email: firmEmail };
+
+    return NextResponse.json({ project: clientProject, firmContact });
   } catch (err) {
     console.error("[GET /api/share/token]", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });
