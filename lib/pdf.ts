@@ -653,7 +653,23 @@ async function addPlanSlide(
   const listTop = H - M - 40;
   const listBot = M + 54;
   const rowH    = 26;
-  const maxRooms = Math.max(1, Math.min(rooms.length, Math.floor((listTop - listBot) / rowH)));
+  // How many rooms fit in the sidebar. Clamp the *capacity* at zero, then take
+  // the smaller of that and the actual room count.
+  //
+  // This previously read `Math.max(1, Math.min(rooms.length, capacity))`. The
+  // max(1) was meant to stop a non-positive loop bound, but when a plan has no
+  // analysed rooms it forced the count back up to 1 — so the loop ran once and
+  // dereferenced rooms[0], which is undefined. That threw, and since this slide
+  // is in every deck, PDF generation failed outright for any project whose
+  // analysis produced no rooms.
+  const capacity = Math.max(0, Math.floor((listTop - listBot) / rowH));
+  const maxRooms = Math.min(rooms.length, capacity);
+
+  if (rooms.length === 0) {
+    page.drawText("Room details pending analysis", {
+      x: rx, y: listTop, size: ts(t, TYPE.caption), font, color: mutedCol,
+    });
+  }
 
   let roomY = listTop;
   for (let i = 0; i < maxRooms; i++) {

@@ -58,6 +58,12 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error("[GET /api/export/preview]", err);
-    return NextResponse.json({ error: "Preview generation failed" }, { status: 500 });
+    // Surface the real reason. This route is already scoped to the architect's
+    // own project, and a generic "Preview generation failed" gave neither them
+    // nor us anything to act on.
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Preview generation failed" },
+      { status: 500 },
+    );
   }
 }

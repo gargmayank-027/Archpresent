@@ -24,7 +24,7 @@ export default function ExportPage() {
   const [pageImages,     setPageImages]     = useState<string[] | null>(null);
   const [pdfBytes,       setPdfBytes]       = useState<ArrayBuffer | null>(null);
   const [previewLoading, setPreviewLoading] = useState(true);
-  const [previewError,   setPreviewError]   = useState(false);
+  const [previewError,   setPreviewError]   = useState<string | null>(null);
   const [themeSaving,    setThemeSaving]    = useState(false);
   const [pageLabels,     setPageLabels]     = useState<string[] | null>(null);
 
@@ -82,10 +82,18 @@ export default function ExportPage() {
 
   async function loadPreview() {
     setPreviewLoading(true);
-    setPreviewError(false);
+    setPreviewError(null);
     try {
       const res = await fetch(`/api/export/preview?projectId=${id}`, { cache: "no-store" });
-      if (!res.ok) throw new Error("preview fetch failed");
+      if (!res.ok) {
+        // Distinguish "the server couldn't build the PDF" from "your browser
+        // couldn't render it". Completely different causes; the old message
+        // ("Couldn't render the live preview") covered both and so told nobody
+        // anything actionable.
+        let detail = String(res.status);
+        try { const b = await res.json(); if (b?.error) detail = b.error; } catch { /* non-JSON body */ }
+        throw new Error(`Server couldn't build this PDF — ${detail}`);
+      }
 
       // Labels come from the PDF builder itself — one per real page — so the
       // filmstrip can never drift from the document again.
@@ -95,6 +103,7 @@ export default function ExportPage() {
       } catch { setPageLabels(null); }
 
       const bytes = await res.arrayBuffer();
+      if (bytes.byteLength === 0) throw new Error("Server returned an empty PDF");
       setPdfBytes(bytes);
 
       // Render every page of the ACTUAL PDF to an image, client-side. This
@@ -114,6 +123,15 @@ export default function ExportPage() {
       const pdfjsLib = await import("pdfjs-dist");
       pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
+      // Confirm the worker is actually being served. It's generated into
+      // public/ by scripts/copy-pdf-worker.mjs via the prebuild hook, so a 404
+      // here means that step didn't run on this deploy — worth saying plainly
+      // rather than surfacing pdf.js's opaque "fake worker" failure.
+      const probe = await fetch("/pdf.worker.min.mjs", { method: "HEAD" });
+      if (!probe.ok) {
+        throw new Error("PDF renderer missing at /pdf.worker.min.mjs — the prebuild step didn't run on this deploy");
+      }
+
       const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
       const images: string[] = [];
       for (let i = 1; i <= doc.numPages; i++) {
@@ -129,9 +147,9 @@ export default function ExportPage() {
       }
       setPageImages(images);
     } catch (err) {
-      console.error("[export] preview render failed", err);
+      console.error("[export] preview failed", err);
       setPageImages(null);
-      setPreviewError(true);
+      setPreviewError(err instanceof Error ? err.message : "Couldn't render the live preview");
     } finally {
       setPreviewLoading(false);
     }
@@ -253,7 +271,26 @@ export default function ExportPage() {
 
   const { analysis, planStrengths = [], moodboards = [], styleProfile,
           overallMoodboard, roomMoodboards = [] } = project;
-  const isReady = planStrengths.length > 0;
+  // Export/share readiness.
+  //
+  // This used to be `planStrengths.length > 0`, which used strengths as a
+  // proxy for "the analysis ran". If the vision pass produced rooms but no
+  // strengths — or strengths failed to save — the architect was blocked with
+  // "Complete plan analysis first" for something they had already done, and
+  // with no way to tell what was actually missing.
+  //
+  // Rooms are the real signal: without them the deck has no walkthrough and no
+  // Why-This-Works, which is most of its value. Strengths are optional — that
+  // slide is simply skipped.
+  const hasAnalysis  = Boolean(analysis);
+  const hasRooms     = (analysis?.rooms?.length ?? 0) > 0;
+  const isReady      = hasRooms;
+
+  const notReadyReason = hasRooms
+    ? null
+    : !hasAnalysis
+    ? "This plan hasn't been analysed yet."
+    : "The analysis finished but found no rooms — it may have failed partway.";
 
   // Build slide deck — mirrors PDF page order, branches on presentation type
 
@@ -334,7 +371,7 @@ export default function ExportPage() {
               Review & Export
             </h1>
             <p className="text-stone-500 text-sm">
-              {slides.length}-slide 16:9 PDF deck — preview each slide below before exporting.
+              {previewItems.length}-slide 16:9 PDF deck — preview each slide below before exporting.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -409,8 +446,14 @@ export default function ExportPage() {
         )}
         {!isReady && (
           <div className="mt-4 border border-stone-200 bg-stone-50 rounded-sm px-4 py-3 text-sm text-stone-500">
-            Complete plan analysis first before exporting.{" "}
+            {notReadyReason}{" "}
             <a href={`/project/${id}/review`} className="underline underline-offset-2">Go to Review →</a>
+            {hasAnalysis && !hasRooms && (
+              <span className="block mt-1 text-xs text-stone-400">
+                Try Re-analyse on the review page. If it keeps finding no rooms, the plan image may be
+                too low-resolution or the room labels unreadable.
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -478,7 +521,7 @@ export default function ExportPage() {
           </div>
           {previewError && (
             <p className="text-xs text-red-500 -mt-2">
-              Couldn't render the live preview.{" "}
+              {previewError}.{" "}
               <button type="button" onClick={loadPreview} className="underline underline-offset-2">
                 Retry
               </button>
