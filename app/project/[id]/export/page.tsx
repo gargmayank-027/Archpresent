@@ -92,11 +92,14 @@ export default function ExportPage() {
       // is the same file the Download button will hand out, so what you see
       // here is guaranteed byte-identical to what you download — there's no
       // separate mockup that can drift out of sync.
+      // Load the worker from the CDN, matching how every other pdfjs call site
+      // in this app does it (project/new, review). The `new URL(...,
+      // import.meta.url)` form makes webpack emit the worker as a bundled
+      // asset, which Next's minifier then tries to parse as a classic script —
+      // it chokes on the ESM syntax inside and fails the build.
       const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs",
-        import.meta.url
-      ).toString();
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
       const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
       const images: string[] = [];
