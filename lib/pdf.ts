@@ -175,7 +175,7 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
   // which carry their own identity block.
   const pages = doc.getPages();
   for (let i = 1; i < pages.length - 1; i++) {
-    addSlideFooter(pages[i], reg, bold, i + 1, pages.length, firm, accent, t);
+    addSlideFooter(pages[i], reg, bold, i + 1, pages.length, firm, accent, t, FEATURE_PAGES.has(pages[i]));
   }
 
   return Buffer.from(await doc.save());
@@ -1162,12 +1162,21 @@ function isDarkSurface(c: RGB): boolean {
   return 0.299 * c.red + 0.587 * c.green + 0.114 * c.blue < 0.5;
 }
 
-/** Paint the slide background + optional top accent bar. */
+/**
+ * Paint the slide background + optional top accent bar.
+ *
+ * Also records whether this slide uses the feature surface, so the footer pass
+ * at the end of buildProjectPdf can pick a colour that actually contrasts.
+ * pdf-lib gives no way to read a page's background back, hence the tag.
+ */
+const FEATURE_PAGES = new WeakSet<PDFPage>();
+
 function slideBackground(page: PDFPage, t: PdfTheme, accent: RGB, feature = false) {
   page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: feature ? t.featureBg : t.pageBg });
   if (t.accentBar) {
     page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
   }
+  if (feature) FEATURE_PAGES.add(page);
 }
 
 function addSlideFooter(
@@ -1179,20 +1188,24 @@ function addSlideFooter(
   firm: FirmProfile | null,
   accent: RGB,
   t: PdfTheme,
+  onFeature: boolean,
 ) {
-  // The footer sits on whatever surface the slide used, so pick a text colour
-  // that survives both. Sampling the page's own background is not possible
-  // via pdf-lib, so feature slides pass their own footer treatment instead:
-  // this uses the muted tone that works on both in every preset.
+  // The footer must be told which surface it landed on. Drawing the firm's
+  // accent on a near-black feature slide renders it effectively invisible —
+  // a graphite accent on a #1e1c1a background is almost the same colour.
+  const col = onFeature
+    ? (isDarkSurface(t.featureBg) ? t.onFeatureMuted : t.muted)
+    : (isDarkSurface(t.pageBg) ? t.muted : accent);
+
   const firmName = firm?.name ?? "Architecture Studio";
   const label    = `${pageNum} / ${total}`;
   const labelW   = font.widthOfTextAtSize(label, ts(t, TYPE.footer));
 
   page.drawText(firmName, {
-    x: M, y: M - 6, size: ts(t, TYPE.footer), font: bold, color: accent, opacity: 0.75,
+    x: M, y: M - 6, size: ts(t, TYPE.footer), font: bold, color: col, opacity: 0.85,
   });
   page.drawText(label, {
-    x: W - M - labelW, y: M - 6, size: ts(t, TYPE.footer), font, color: accent, opacity: 0.75,
+    x: W - M - labelW, y: M - 6, size: ts(t, TYPE.footer), font, color: col, opacity: 0.85,
   });
 }
 
@@ -1257,6 +1270,34 @@ async function addRoomWalkthroughSlide(
   const COLS = 2;
   const ROWS = 3;
 
+  // ── Plan snippets ──────────────────────────────────────────────────────
+  //
+  // Each card shows a crop of the floor plan so the client can see WHICH
+  // space is being described, rather than matching room names to a plan two
+  // slides back.
+  //
+  // Cropped here in pdf-lib via a clip rect rather than through lib/planCrop.ts
+  // (sharp): the image is embedded once and reused across every card, so
+  // there's no per-room fetch, no extra Supabase storage, and no sharp
+  // dependency on Vercel.
+  //
+  // Crops come from planImagePath — the exact image the vision pass measured
+  // against. NOT renderedPlanUrl: FloodFillRenderer appends a legend strip
+  // (`canvas.height = h + legendH`), so the rendered plan is taller than the
+  // original and normalised y-coordinates would land in the wrong place.
+  let planImg: PDFImage | null = null;
+  const anyBoxes = rooms.some((r) => r.boundingBox);
+  if (anyBoxes && project.planImagePath) {
+    try {
+      const bytes = await loadImageBytes(project.planImagePath);
+      if (bytes) {
+        planImg = await doc.embedPng(bytes).catch(() => doc.embedJpg(bytes));
+      }
+    } catch (err) {
+      console.warn("[pdf] Plan snippet image unavailable (non-fatal):", String(err));
+    }
+  }
+
   const brief = project.plotInfo;
   const subtitle = brief?.familyDetails
     ? `Designed for ${brief.familyDetails}${brief.priorities ? ` — prioritising ${brief.priorities.toLowerCase()}` : ""}.`
@@ -1296,10 +1337,29 @@ async function addRoomWalkthroughSlide(
       page.drawRectangle({ x, y, width: 3, height: cardH, color: accent });
 
       const padX = 18;
+
+      // Snippet on the left, text to its right. Rooms the vision pass didn't
+      // locate simply get the full card width — better than a placeholder
+      // tile pretending we know where the room is.
+      const box = room.boundingBox;
+      let textX = x + padX;
+      let textW = cardW - padX * 2;
+
+      if (planImg && box) {
+        const thumbSize = cardH - 24;
+        const tx = x + padX;
+        const ty = y + 12;
+
+        drawPlanSnippet(page, planImg, box, { x: tx, y: ty, width: thumbSize, height: thumbSize }, t, accent);
+
+        textX = tx + thumbSize + 16;
+        textW = x + cardW - padX - textX;
+      }
+
       let cy = y + cardH - 26;
 
       page.drawText(room.name.toUpperCase(), {
-        x: x + padX, y: cy,
+        x: textX, y: cy,
         size: ts(t, TYPE.cardTitle), font: bold,
         color: onFeature ? t.onFeature : t.ink,
       });
@@ -1308,7 +1368,7 @@ async function addRoomWalkthroughSlide(
         const areaStr = `${room.sizeEstimateSqm} m²`;
         const aW = font.widthOfTextAtSize(areaStr, ts(t, TYPE.caption));
         page.drawText(areaStr, {
-          x: x + cardW - padX - aW, y: cy + 2,
+          x: textX + textW - aW, y: cy + 2,
           size: ts(t, TYPE.caption), font,
           color: onFeature ? t.onFeatureMuted : t.muted,
         });
@@ -1316,21 +1376,21 @@ async function addRoomWalkthroughSlide(
 
       cy -= 18;
       page.drawLine({
-        start: { x: x + padX, y: cy }, end: { x: x + cardW - padX, y: cy },
+        start: { x: textX, y: cy }, end: { x: textX + textW, y: cy },
         thickness: 0.5, color: t.ruleOnFeature,
       });
       cy -= ts(t, TYPE.body) + 6;
 
       const desc = project.roomNarratives?.[room.name] ?? buildRoomNarrative(room, project.plotInfo);
       const maxLines = Math.max(1, Math.floor((cy - y - 12) / (ts(t, TYPE.body) + 4)) + 1);
-      const lines = wrapText(desc, font, ts(t, TYPE.body), cardW - padX * 2);
+      const lines = wrapText(desc, font, ts(t, TYPE.body), textW);
 
       lines.slice(0, maxLines).forEach((line, li) => {
         // If the narrative is longer than the card, ellipsise the last visible
         // line rather than cutting mid-sentence with no signal.
         const isLast = li === maxLines - 1 && lines.length > maxLines;
         page.drawText(isLast ? `${line}…` : line, {
-          x: x + padX, y: cy,
+          x: textX, y: cy,
           size: ts(t, TYPE.body), font,
           color: onFeature ? t.onFeature : t.ink,
           opacity: onFeature ? 0.88 : 1,
@@ -1339,6 +1399,88 @@ async function addRoomWalkthroughSlide(
       });
     });
   }
+}
+
+/**
+ * Draw the region of `img` described by a normalised bounding box, fitted into
+ * `thumb`, clipped so nothing spills outside.
+ *
+ * Bounding boxes are normalised 0-1 with origin at TOP-left (see
+ * RoomBoundingBox in types/index.ts); PDF user space has its origin at
+ * BOTTOM-left, hence the y-flip below.
+ */
+function drawPlanSnippet(
+  page: PDFPage,
+  img: PDFImage,
+  box: { x: number; y: number; width: number; height: number },
+  thumb: { x: number; y: number; width: number; height: number },
+  t: PdfTheme,
+  accent: RGB,
+) {
+  // Clamp: the vision pass occasionally returns values slightly outside 0-1,
+  // and a zero/negative extent would make the scale below divide by zero.
+  const bx = Math.min(Math.max(box.x, 0), 1);
+  const by = Math.min(Math.max(box.y, 0), 1);
+  const bw = Math.min(Math.max(box.width, 0.01), 1 - bx);
+  const bh = Math.min(Math.max(box.height, 0.01), 1 - by);
+
+  // A little context around the room helps the client locate it on the plan;
+  // a tight crop of four walls is hard to place. Kept modest because fitting a
+  // non-square region into a square thumb already reveals extra along the
+  // short axis.
+  const PAD = 0.08;
+  const px = Math.max(0, bx - bw * PAD);
+  const py = Math.max(0, by - bh * PAD);
+  const pw = Math.min(1 - px, bw * (1 + PAD * 2));
+  const ph = Math.min(1 - py, bh * (1 + PAD * 2));
+
+  // Plans are line drawings on white — give them a plate so they read on the
+  // dark feature surface.
+  page.drawRectangle({
+    x: thumb.x, y: thumb.y, width: thumb.width, height: thumb.height,
+    color: t.white,
+  });
+
+  // Fit the padded region inside the thumb (contain, not cover — cropping a
+  // crop would defeat the point).
+  const scale = Math.min(
+    thumb.width / (pw * img.width),
+    thumb.height / (ph * img.height),
+  );
+  const dw = img.width * scale;
+  const dh = img.height * scale;
+
+  // Place the image so the region's centre lands on the thumb's centre.
+  const dx = thumb.x + thumb.width / 2 - (px + pw / 2) * dw;
+  const dy = thumb.y + thumb.height / 2 - (1 - py - ph / 2) * dh;
+
+  drawClippedImage(page, img, { x: dx, y: dy, width: dw, height: dh }, thumb);
+
+  // Outline the room itself. The crop deliberately includes neighbouring
+  // spaces for context, and on a real plan — black lines on white, no colour
+  // coding — a square containing three rooms doesn't tell the client which one
+  // we mean. The outline does. Clipped to the thumb so it can't spill.
+  page.pushOperators(
+    pushGraphicsState(),
+    rectangle(thumb.x, thumb.y, thumb.width, thumb.height),
+    clip(),
+    endPath(),
+  );
+  page.drawRectangle({
+    x: dx + bx * dw,
+    y: dy + (1 - by - bh) * dh,
+    width: bw * dw,
+    height: bh * dh,
+    borderColor: accent,
+    borderWidth: 1.5,
+  });
+  page.pushOperators(popGraphicsState());
+
+  // Hairline keeps the white plate from bleeding into the card on light themes.
+  page.drawRectangle({
+    x: thumb.x, y: thumb.y, width: thumb.width, height: thumb.height,
+    borderColor: t.ruleOnFeature, borderWidth: 0.5,
+  });
 }
 
 // buildRoomNarrative moved to lib/narrative.ts (pure logic, no server-only

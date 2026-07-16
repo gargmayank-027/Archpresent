@@ -87,9 +87,13 @@ export function buildRoomNarrative(room: RoomDetail, plotInfo?: PlotInfo): strin
     return `Future-ready lift provision${sqm ? ` (${sqm} sqm)` : ""} — adds convenience and long-term accessibility to the home.`;
   }
 
-  // Generic fallback
-  const parts = [`${room.name}${sqm ? ` (${sqm} sqm)` : ""}`];
-  if (orient) parts.push(`${orient.charAt(0).toUpperCase() + orient.slice(1)}-oriented.`);
-  if (features.length) parts.push(`Features: ${features.slice(0, 2).join(", ")}.`);
-  return parts.join(" — ") + ".";
+  // Generic fallback. Kept deliberately plain — it only runs for room types
+  // we don't recognise, and inventing detail we can't verify would be worse
+  // than saying little.
+  const bits: string[] = [];
+  if (sqm) bits.push(`${sqm} sqm`);
+  if (orient) bits.push(`${orient}-facing`);
+  const lead = bits.length ? `${room.name} — ${bits.join(", ")}.` : `${room.name}.`;
+  const extra = features.length ? ` Features ${features.slice(0, 2).join(" and ").toLowerCase()}.` : "";
+  return (lead + extra).trim();
 }
