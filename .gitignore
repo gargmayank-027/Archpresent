@@ -36,3 +36,8 @@ next-env.d.ts
 # archpresent data files
 .archpresent-data.json
 /public/uploads/
+
+# pdf.js worker — generated into public/ by scripts/copy-pdf-worker.mjs
+# via the prebuild/predev npm hooks. Not committed: it is a ~1.3MB build
+# artefact that must stay in lockstep with the installed pdfjs-dist version.
+/public/pdf.worker.min.mjs

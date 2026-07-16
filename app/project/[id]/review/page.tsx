@@ -100,8 +100,7 @@ export default function ReviewPage() {
     setAutoRasterizing(true);
     try {
       const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
       const pdfRes = await fetch(proj.planImageUrl);
       const pdfData = new Uint8Array(await pdfRes.arrayBuffer());
@@ -149,7 +148,7 @@ export default function ReviewPage() {
 
       // 1. Render the PDF page to a canvas using pdfjs-dist in the browser
       const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
       const pdfRes = await fetch(page.imageUrl);
       const pdfData = new Uint8Array(await pdfRes.arrayBuffer());
@@ -984,8 +983,7 @@ function PdfPageThumb({ pdfUrl }: { pdfUrl: string }) {
 
     try {
       const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
       const res     = await fetch(pdfUrl);
       const data    = new Uint8Array(await res.arrayBuffer());

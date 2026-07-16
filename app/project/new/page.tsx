@@ -128,8 +128,7 @@ export default function NewProjectPage() {
         setError(null);
         try {
           const pdfjsLib = await import("pdfjs-dist");
-          pdfjsLib.GlobalWorkerOptions.workerSrc =
-            `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+          pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
           const pdfData = new Uint8Array(await file.arrayBuffer());
           const doc = await pdfjsLib.getDocument({ data: pdfData }).promise;
