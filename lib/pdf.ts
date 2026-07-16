@@ -2,14 +2,21 @@
  * lib/pdf.ts
  *
  * 16:9 widescreen PDF deck — 1190 × 669 pt (close to 16:9 at 72 dpi).
- * Designed like a keynote/PowerPoint presentation slide, not a document.
+ * Designed like a keynote slide, not a document.
  *
- * Pages:
- *   1. Cover         — full-bleed split layout, logo, project name
- *   2. Site Context  — two-column data + compass rose
- *   3. Floor Plan    — full-bleed plan on dark background
- *   4. Plan Strengths — two-column numbered bullets
- *   5+. Moodboard    — full-bleed image + room label overlay
+ * Design rules (each slide answers exactly ONE client question):
+ *   1. Cover            — "Who is this from?"
+ *   2. Site Context     — "Where is my plot?"      → stat grid + compass
+ *   3. Floor Plan       — "What does my home look like?" → plan dominates
+ *   4. Strengths        — "Why is this plan good?"  → max 5, big numerals
+ *   5+. Walkthrough     — "What's in each room?"    → 6 room cards / slide
+ *   6. Why This Works   — "How does this fit MY life?" → insight cards
+ *   7. Vastu (opt-in)   — "Is it Vastu-compliant?"  → score + pass/fail
+ *   8+. Moodboards      — interior decks only
+ *
+ * Surface + typography come from lib/pdfTheme.ts (the firm's chosen preset);
+ * the firm's accent colour is layered on top so branding survives a theme
+ * switch.
  */
 
 import {
@@ -32,6 +39,7 @@ import http from "http";
 import type { Project, Moodboard, FirmProfile, PdfAccentColor, RoomMoodboard, OverallMoodboard } from "@/types";
 import { firmStore } from "@/lib/store";
 import { buildRoomNarrative } from "@/lib/narrative";
+import { getPdfTheme, PdfTheme, TYPE, ts } from "@/lib/pdfTheme";
 
 // ─── 16:9 slide dimensions (pt) ──────────────────────────────────────────────
 const W  = 1190;   // 16 units
@@ -49,23 +57,30 @@ const ACCENT_COLORS: Record<PdfAccentColor, RGB> = {
   plum:       rgb(0.227, 0.102, 0.267),
 };
 
-// ─── Color palette ────────────────────────────────────────────────────────────
-const C = {
-  bg:      rgb(0.97, 0.96, 0.94),   // warm off-white
-  bgDark:  rgb(0.12, 0.11, 0.10),   // near-black for full-bleed slides
-  ink:     rgb(0.10, 0.10, 0.10),
-  muted:   rgb(0.50, 0.50, 0.47),
-  light:   rgb(0.85, 0.84, 0.82),   // light text on dark bg
-  rule:    rgb(0.80, 0.78, 0.74),
-  altRow:  rgb(0.93, 0.92, 0.90),
-  white:   rgb(1, 1, 1),
-};
+// Surfaces and type now come from the firm's chosen preset — see
+// lib/pdfTheme.ts. (The old hardcoded `C` palette also referenced a `C.dark`
+// key that was never defined, so pdf-lib silently fell back to pure black on
+// the walkthrough / highlights / vastu slides.)
+
+// Pass/fail indicator colours — semantic, so they stay constant across themes.
+const PASS = rgb(0.18, 0.62, 0.38);
+const FAIL = rgb(0.72, 0.45, 0.16);
+
+// Text sitting directly on a photographic moodboard image is always light,
+// regardless of preset — the image, not the theme, is the surface underneath.
+const ON_IMAGE       = rgb(0.96, 0.96, 0.95);
+const ON_IMAGE_MUTED = rgb(0.74, 0.74, 0.72);
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function buildProjectPdf(project: Project): Promise<Buffer> {
   const firm   = await firmStore.get();
   const accent = ACCENT_COLORS[firm?.accentColor ?? "graphite"];
+
+  // The firm's chosen visual preset. Threaded explicitly through every slide
+  // rather than held in module scope, so concurrent exports in the same
+  // serverless process can't clobber each other's theme mid-render.
+  const t = getPdfTheme(project.presentationTheme);
 
   const doc    = await PDFDocument.create();
   const reg    = await doc.embedFont(StandardFonts.Helvetica);
@@ -91,117 +106,87 @@ export async function buildProjectPdf(project: Project): Promise<Buffer> {
 
   if (project.presentationType === "concept") {
     // ── CONCEPT PRESENTATION ──────────────────────────────────────────
-    console.log(`[pdf] Building concept deck: ${project.name}`);
+    console.log(`[pdf] Building concept deck: ${project.name} (theme: ${t.id})`);
     console.log(`[pdf] Plan: ${(project.aiRenderedPlanUrl ?? project.renderedPlanUrl ?? project.planImagePath ?? "none").slice(0, 80)}`);
     // First-meeting deck: spatial storytelling, no moodboards
-    await addCoverSlide(doc, project, firm, accent, reg, bold, italic, logoBytes, logoIsPng);
+    await addCoverSlide(doc, project, firm, accent, t, reg, bold, italic, logoBytes, logoIsPng);
 
     if (project.plotInfo && Object.keys(project.plotInfo).length > 0) {
-      await addSiteContextSlide(doc, project, accent, reg, bold);
+      await addSiteContextSlide(doc, project, accent, t, reg, bold);
     }
 
-    await addPlanSlide(doc, project, accent, reg, bold);
+    await addPlanSlide(doc, project, accent, t, reg, bold);
 
     if ((project.planStrengths ?? []).length > 0) {
-      await addStrengthsSlide(doc, project, project.planStrengths!, accent, reg, bold);
+      await addStrengthsSlide(doc, project, project.planStrengths!, accent, t, reg, bold);
     }
 
-    // Room-by-room narrative walkthrough
+    // Room-by-room narrative walkthrough — paginates across as many slides
+    // as the rooms need.
     if (project.analysis?.rooms?.length) {
-      await addRoomWalkthroughSlide(doc, project, accent, reg, bold, italic);
+      await addRoomWalkthroughSlide(doc, project, accent, t, reg, bold, italic);
     }
 
-    // Spatial highlights — area comparisons in plain language
+    // Lifestyle insights tied back to the client brief
     if (project.analysis?.rooms?.length) {
-      await addSpatialHighlightsSlide(doc, project, accent, reg, bold, italic);
+      await addSpatialHighlightsSlide(doc, project, accent, t, reg, bold, italic);
     }
 
     // Vastu compliance check (only if client opted in)
     if (project.plotInfo?.showVastu && project.plotInfo?.facing && project.analysis?.rooms?.length) {
-      await addVastuSlide(doc, project, accent, reg, bold, italic);
+      await addVastuSlide(doc, project, accent, t, reg, bold, italic);
     }
+
+    await addThankYouSlide(doc, project, firm, accent, t, reg, bold, italic);
 
   } else {
     // ── INTERIOR PRESENTATION ─────────────────────────────────────────
     // Design-phase deck: moodboards for every room
-    await addCoverSlide(doc, project, firm, accent, reg, bold, italic, logoBytes, logoIsPng);
+    await addCoverSlide(doc, project, firm, accent, t, reg, bold, italic, logoBytes, logoIsPng);
 
     if (project.plotInfo && Object.keys(project.plotInfo).length > 0) {
-      await addSiteContextSlide(doc, project, accent, reg, bold);
+      await addSiteContextSlide(doc, project, accent, t, reg, bold);
     }
 
-    await addPlanSlide(doc, project, accent, reg, bold);
+    await addPlanSlide(doc, project, accent, t, reg, bold);
 
     if ((project.planStrengths ?? []).length > 0) {
-      await addStrengthsSlide(doc, project, project.planStrengths!, accent, reg, bold);
+      await addStrengthsSlide(doc, project, project.planStrengths!, accent, t, reg, bold);
     }
 
     if (project.overallMoodboard) {
-      await addOverallMoodboardSlide(doc, project.overallMoodboard, project, accent, reg, bold, italic);
+      await addOverallMoodboardSlide(doc, project.overallMoodboard, project, accent, t, reg, bold, italic);
     }
 
     if (project.roomMoodboards && project.roomMoodboards.length > 0) {
       for (const rm of project.roomMoodboards) {
-        await addRoomMoodboardSlide(doc, rm, project, accent, reg, bold);
+        await addRoomMoodboardSlide(doc, rm, project, accent, t, reg, bold);
       }
     } else {
       for (const mb of project.moodboards ?? []) {
-        await addMoodboardSlide(doc, mb, accent, reg, bold);
+        await addMoodboardSlide(doc, mb, accent, t, reg, bold);
       }
     }
+
+    await addThankYouSlide(doc, project, firm, accent, t, reg, bold, italic);
   }
 
-  // Footer on all pages
+  // Footer on all pages except the cover (page 1) and the closing slide,
+  // which carry their own identity block.
   const pages = doc.getPages();
-  for (let i = 0; i < pages.length; i++) {
-    addSlideFooter(pages[i], reg, bold, i + 1, pages.length, firm, accent);
+  for (let i = 1; i < pages.length - 1; i++) {
+    addSlideFooter(pages[i], reg, bold, i + 1, pages.length, firm, accent, t);
   }
 
   return Buffer.from(await doc.save());
 }
 
-/**
- * Rasterise every page of a generated PDF into an image, one buffer per page.
- *
- * Used by app/api/export/preview to show the actual PDF pages in the
- * Review & Export screen. This is NOT for uploaded floor plan PDFs (those
- * are rasterised client-side). The PDF here is one we generated ourselves
- * with pdf-lib — a simple vector/image PDF that sharp *may* be able to
- * handle (depends on the libvips build). If sharp can't do it, fall back
- * gracefully and let the caller use the JSX preview instead.
- */
-export async function rasterizePdfToPageImages(
-  pdfBuffer: Buffer,
-  density = 130
-): Promise<Buffer[]> {
-  // Sharp cannot render PDFs on Vercel (no PDF codec in the serverless build).
-  // This always fails, so return empty immediately to skip the attempt and
-  // let the frontend use the JSX fallback preview.
-  if (process.env.VERCEL) {
-    return [];
-  }
-
-  try {
-    const sharp = (await import("sharp")).default;
-    const probe = (sharp as unknown as (input: Buffer, opts: object) => import("sharp").Sharp)(
-      pdfBuffer, { density }
-    );
-    const meta = await probe.metadata();
-    const pageCount = (meta as unknown as { pages?: number }).pages ?? 1;
-
-    const images: Buffer[] = [];
-    for (let i = 0; i < pageCount; i++) {
-      const buf = await (sharp as unknown as (input: Buffer, opts: object) => import("sharp").Sharp)(
-        pdfBuffer, { density, page: i }
-      ).jpeg({ quality: 82 }).toBuffer();
-      images.push(buf);
-    }
-    return images;
-  } catch (err) {
-    console.warn("[pdf] Rasterisation unavailable:", String(err));
-    return [];
-  }
-}
+// NOTE: server-side rasterisation (sharp) used to live here, to turn the
+// generated PDF into page images for the Export screen. Sharp has no PDF
+// codec in Vercel's serverless build, so it always failed there and the UI
+// silently fell back to a hand-maintained JSX mockup that had drifted from
+// the real deck. The Export screen now renders these PDF bytes directly with
+// pdf.js in the browser, so preview and download can never disagree.
 
 // ─── 1. Cover slide ───────────────────────────────────────────────────────────
 // Layout: left half = accent color block, right half = off-white with text
@@ -211,6 +196,7 @@ async function addCoverSlide(
   project: Project,
   firm: FirmProfile | null,
   accent: RGB,
+  t: PdfTheme,
   font: PDFFont,
   bold: PDFFont,
   italic: PDFFont,
@@ -219,120 +205,184 @@ async function addCoverSlide(
 ) {
   const page = doc.addPage([W, H]);
 
-  // Left accent panel — 42% of width
-  const splitX = Math.round(W * 0.42);
-  page.drawRectangle({ x: 0, y: 0, width: splitX, height: H, color: accent });
+  // The cover answers exactly one question: "who is this from, and what is
+  // it?" Everything else (specs, QR, tagline) is secondary and sized as such.
+  const isSplit = t.coverStyle === "split";
+  const isBand  = t.coverStyle === "band";
 
-  // Right panel — warm off-white
-  page.drawRectangle({ x: splitX, y: 0, width: W - splitX, height: H, color: C.bg });
+  // ── Surface ────────────────────────────────────────────────────────────
+  const splitX = Math.round(W * 0.46);
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: t.pageBg });
 
-  // ── Left panel content ─────────────────────────────────────────────────
-  // "CONCEPT PRESENTATION" — small label top
-  page.drawText("CONCEPT PRESENTATION", {
-    x: M, y: H - M,
-    size: 8, font, color: rgb(1,1,1), opacity: 0.5,
-  });
-
-  // Project name — large, white
-  const projLines = wrapText(project.name.toUpperCase(), bold, 38, splitX - M * 2);
-  let projY = H * 0.58;
-  for (const line of projLines) {
-    page.drawText(line, { x: M, y: projY, size: 38, font: bold, color: C.white });
-    projY -= 46;
-  }
-
-  // Thin rule
-  page.drawLine({
-    start: { x: M, y: projY - 8 },
-    end:   { x: splitX - M, y: projY - 8 },
-    thickness: 0.6, color: rgb(1,1,1), opacity: 0.3,
-  });
-
-  // Client name
-  page.drawText(`Prepared for`, {
-    x: M, y: projY - 28, size: 9, font, color: rgb(1,1,1), opacity: 0.55,
-  });
-  page.drawText(project.clientName, {
-    x: M, y: projY - 44, size: 14, font: italic, color: C.white, opacity: 0.9,
-  });
-
-  // Date — bottom left of panel, clear of the global footer band
-  const dateStr = new Date(project.createdAt).toLocaleDateString("en-GB", {
-    year: "numeric", month: "long", day: "numeric",
-  });
-  page.drawText(dateStr, { x: M, y: M + FOOTER_H + 14, size: 8, font, color: rgb(1,1,1), opacity: 0.45 });
-
-  // ── Right panel content ─────────────────────────────────────────────────
-  const rx = splitX + M;  // right content x-origin
-
-  // Logo — top right
-  if (logoBytes) {
-    try {
-      const img  = logoIsPng ? await doc.embedPng(logoBytes) : await doc.embedJpg(logoBytes);
-      const dims = img.scaleToFit(130, 48);
-      page.drawImage(img, {
-        x: W - M - dims.width, y: H - M - dims.height,
-        width: dims.width, height: dims.height, opacity: 0.8,
-      });
-    } catch { /* fallback to text */ }
-  }
-
-  // Firm name
-  const firmName = (firm?.name ?? project.firmName).toUpperCase();
-  const fnW = bold.widthOfTextAtSize(firmName, 9);
-  page.drawText(firmName, {
-    x: W - M - fnW, y: logoBytes ? H - M - 56 : H - M,
-    size: 9, font: bold, color: C.muted,
-  });
-
-  // Cover tagline — large editorial text
-  if (firm?.coverTagline) {
-    const tagLines = wrapText(firm.coverTagline, italic, 22, W - splitX - M * 2);
-    let ty = H * 0.60;
-    for (const line of tagLines) {
-      page.drawText(line, { x: rx, y: ty, size: 22, font: italic, color: C.ink, opacity: 0.7 });
-      ty -= 28;
-    }
-  }
-
-  // Plot tag line — middle right
-  const plotParts: string[] = [];
-  if (project.plotInfo?.numberOfBedrooms) plotParts.push(`${project.plotInfo.numberOfBedrooms} BHK`);
-  if (project.plotInfo?.propertyType)     plotParts.push(project.plotInfo.propertyType);
-  if (project.plotInfo?.facing)           plotParts.push(`${project.plotInfo.facing}-facing`);
-  if (project.plotInfo?.builtUpAreaSqm)   plotParts.push(`${project.plotInfo.builtUpAreaSqm} sqm`);
-  else if (project.plotInfo?.plotAreaSqm) plotParts.push(`${project.plotInfo.plotAreaSqm} sqm`);
-
-  if (plotParts.length > 0) {
-    const plotY = firm?.coverTagline ? H * 0.35 : H * 0.50;
-    page.drawText(plotParts.join("  ·  "), {
-      x: rx, y: plotY, size: 10, font, color: C.muted,
+  if (isSplit) {
+    page.drawRectangle({ x: 0, y: 0, width: splitX, height: H, color: accent });
+  } else if (isBand) {
+    page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: t.featureBg });
+    page.drawRectangle({ x: 0, y: H - 10, width: W, height: 10, color: accent });
+  } else {
+    // "quiet" — no colour field at all; a single hairline carries the layout.
+    page.drawLine({
+      start: { x: M, y: H * 0.62 }, end: { x: M + 90, y: H * 0.62 },
+      thickness: 2.5, color: accent,
     });
   }
 
-  // Firm tagline — lower right, clear of the global footer band
-  if (firm?.tagline) {
-    page.drawText(firm.tagline, { x: rx, y: M + FOOTER_H + 14, size: 10, font, color: C.muted });
+  // Text colours depend on which field the copy sits on.
+  const onColour   = isSplit;
+  const titleColor = onColour ? t.white : (isBand ? t.onFeature : t.ink);
+  const subColor   = onColour ? t.white : (isBand ? t.onFeatureMuted : t.muted);
+  const subOpacity = onColour ? 0.72 : 1;
+
+  const cx = isSplit ? M : M;
+  const contentW = isSplit ? splitX - M * 2 : W * 0.62 - M;
+
+  // ── Kicker ─────────────────────────────────────────────────────────────
+  const kicker = project.presentationType === "concept"
+    ? "CONCEPT PRESENTATION"
+    : "INTERIOR PRESENTATION";
+  page.drawText(kicker, {
+    x: cx, y: H - M - 4,
+    size: ts(t, TYPE.kicker), font: bold,
+    color: onColour ? t.white : accent,
+    opacity: onColour ? 0.65 : 1,
+  });
+
+  // ── Project name — the single biggest thing on the page ────────────────
+  const nameSize = ts(t, 46);
+  const projLines = wrapText(project.name, bold, nameSize, contentW);
+  let projY = isSplit ? H * 0.60 : H * 0.52;
+  for (const line of projLines.slice(0, 3)) {
+    page.drawText(line, { x: cx, y: projY, size: nameSize, font: bold, color: titleColor });
+    projY -= nameSize + 8;
   }
 
-  // QR code — bottom right corner, links to the shared presentation
-  if (project.shareToken && project.shareEnabled !== false) {
+  // ── Prepared for ───────────────────────────────────────────────────────
+  page.drawLine({
+    start: { x: cx, y: projY + 4 },
+    end:   { x: cx + Math.min(contentW, 120), y: projY + 4 },
+    thickness: 1, color: onColour ? t.white : accent,
+    opacity: onColour ? 0.35 : 1,
+  });
+
+  page.drawText("PREPARED FOR", {
+    x: cx, y: projY - 26, size: ts(t, 9.5), font, color: subColor, opacity: subOpacity * 0.8,
+  });
+  page.drawText(project.clientName, {
+    x: cx, y: projY - 48, size: ts(t, 19), font: bold, color: titleColor, opacity: onColour ? 0.95 : 1,
+  });
+
+  const dateStr = new Date(project.createdAt).toLocaleDateString("en-GB", {
+    year: "numeric", month: "long", day: "numeric",
+  });
+  page.drawText(dateStr, {
+    x: cx, y: M + 18, size: ts(t, TYPE.caption), font, color: subColor, opacity: subOpacity * 0.75,
+  });
+
+  // ── Right side — firm identity + key specs ─────────────────────────────
+  const rx = isSplit ? splitX + M : W * 0.68;
+
+  if (logoBytes) {
+    try {
+      const img  = logoIsPng ? await doc.embedPng(logoBytes) : await doc.embedJpg(logoBytes);
+      const dims = img.scaleToFit(150, 54);
+      page.drawImage(img, {
+        x: W - M - dims.width, y: H - M - dims.height + 4,
+        width: dims.width, height: dims.height,
+      });
+    } catch { /* fall through to the text lockup below */ }
+  }
+
+  const firmName = (firm?.name ?? project.firmName).toUpperCase();
+  const fnW = bold.widthOfTextAtSize(firmName, ts(t, 11));
+  page.drawText(firmName, {
+    x: W - M - fnW, y: logoBytes ? H - M - 64 : H - M - 4,
+    size: ts(t, 11), font: bold,
+    color: isBand ? t.onFeature : (isSplit ? t.ink : t.ink),
+  });
+
+  if (firm?.tagline) {
+    const tW = font.widthOfTextAtSize(firm.tagline, ts(t, TYPE.caption));
+    page.drawText(firm.tagline, {
+      x: W - M - tW, y: (logoBytes ? H - M - 64 : H - M - 4) - 16,
+      size: ts(t, TYPE.caption), font,
+      color: isBand ? t.onFeatureMuted : t.muted,
+    });
+  }
+
+  // Key specs — a short, scannable stack rather than a run-on line.
+  const specs: { label: string; value: string }[] = [];
+  const pi = project.plotInfo;
+  if (pi?.numberOfBedrooms) specs.push({ label: "CONFIGURATION", value: `${pi.numberOfBedrooms} BHK` });
+  if (pi?.builtUpAreaSqm)   specs.push({ label: "BUILT-UP AREA", value: `${pi.builtUpAreaSqm} sqm` });
+  else if (pi?.plotAreaSqm) specs.push({ label: "PLOT AREA", value: `${pi.plotAreaSqm} sqm` });
+  if (pi?.facing)           specs.push({ label: "FACING", value: pi.facing });
+
+  if (specs.length > 0 && !isSplit) {
+    let sy = H * 0.52;
+    for (const s of specs) {
+      page.drawText(s.label, {
+        x: rx, y: sy, size: ts(t, 8.5), font,
+        color: isBand ? t.onFeatureMuted : t.muted,
+      });
+      page.drawText(s.value, {
+        x: rx, y: sy - 20, size: ts(t, 17), font: bold,
+        color: isBand ? t.onFeature : t.ink,
+      });
+      sy -= 54;
+    }
+  } else if (specs.length > 0) {
+    let sy = H * 0.60;
+    for (const s of specs) {
+      page.drawText(s.label, { x: rx, y: sy, size: ts(t, 8.5), font, color: t.muted });
+      page.drawText(s.value, { x: rx, y: sy - 20, size: ts(t, 17), font: bold, color: t.ink });
+      sy -= 54;
+    }
+  }
+
+  // QR geometry is computed before the tagline so the tagline can reserve
+  // space for it — otherwise long taglines run straight through the code.
+  const hasQr = Boolean(project.shareToken && project.shareEnabled !== false);
+  const qrModule = 2.4;
+  const qrTotal  = hasQr ? 33 * qrModule : 0;   // QR matrices here are 33×33
+  const qrX      = W - M - qrTotal;
+  const qrY      = M + 16;
+
+  if (firm?.coverTagline) {
+    const tagRight = hasQr ? qrX - 24 : W - M;
+    const tagW = Math.max(160, tagRight - rx);
+    const tagLines = wrapText(firm.coverTagline, italic, ts(t, 15), tagW);
+    let ty = M + 84;
+    for (const line of tagLines.slice(0, 3)) {
+      page.drawText(line, {
+        x: rx, y: ty, size: ts(t, 15), font: italic,
+        color: isBand ? t.onFeatureMuted : t.muted,
+      });
+      ty -= 20;
+    }
+  }
+
+  // QR — bottom right, links to the live share link.
+  if (hasQr) {
     try {
       const { generateQrMatrix, drawQrOnPage } = await import("@/lib/qr");
       const shareUrl = `${process.env.APP_URL ?? "https://archpresent.vercel.app"}/share/${project.shareToken}`;
       const qrMatrix = generateQrMatrix(shareUrl);
-      const qrSize = 2.2; // module size in points
-      const qrTotal = qrMatrix.length * qrSize;
-      const qrX = W - M - qrTotal - 4;
-      const qrY = M + FOOTER_H + 8;
+      const actualTotal = qrMatrix.length * qrModule;
+      const ax = W - M - actualTotal;
 
-      drawQrOnPage(page, qrMatrix, qrX, qrY, qrSize, accent, C.bg);
+      const qrBg = isBand ? t.white : t.pageBg;
+      const qrFg = isBand ? t.featureBg : accent;
+      // Pad behind the modules so the code stays scannable on any surface.
+      page.drawRectangle({
+        x: ax - 6, y: qrY - 6, width: actualTotal + 12, height: actualTotal + 12, color: qrBg,
+      });
+      drawQrOnPage(page, qrMatrix, ax, qrY, qrModule, qrFg, qrBg);
 
-      // "Scan to view" label
-      page.drawText("SCAN TO VIEW", {
-        x: qrX + qrTotal / 2 - font.widthOfTextAtSize("SCAN TO VIEW", 5) / 2,
-        y: qrY - 8,
-        size: 5, font, color: C.muted,
+      const lbl = "SCAN TO VIEW ONLINE";
+      page.drawText(lbl, {
+        x: ax + actualTotal / 2 - font.widthOfTextAtSize(lbl, ts(t, 7.5)) / 2,
+        y: qrY - 16, size: ts(t, 7.5), font,
+        color: isBand ? t.onFeatureMuted : t.muted,
       });
     } catch (err) {
       console.warn("[pdf] QR code generation failed (non-fatal):", err);
@@ -347,90 +397,110 @@ async function addSiteContextSlide(
   doc: PDFDocument,
   project: Project,
   accent: RGB,
+  t: PdfTheme,
   font: PDFFont,
   bold: PDFFont,
 ) {
   const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.bg });
+  slideBackground(page, t, accent);
 
-  // Top accent bar
-  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
-
-  slideTitle(page, "SITE CONTEXT", font, bold, accent);
+  const italic = font; // site context has no italic copy; keep the signature small
+  slideHeader(page, {
+    kicker: "Site Context",
+    headline: "Where your home sits",
+  }, t, font, bold, italic, accent);
 
   const p = project.plotInfo!;
-  const rows: { label: string; value: string }[] = [];
-  if (p.propertyType)      rows.push({ label: "Property Type",      value: p.propertyType });
-  if (p.numberOfBedrooms)  rows.push({ label: "Configuration",      value: `${p.numberOfBedrooms} BHK` });
-  if (p.builtUpAreaSqm)    rows.push({ label: "Built-up Area",      value: `${p.builtUpAreaSqm} sqm` });
-  if (p.plotAreaSqm)       rows.push({ label: "Plot / Carpet Area", value: `${p.plotAreaSqm} sqm` });
-  if (p.facing)            rows.push({ label: "Plot Facing",        value: p.facing });
-  if (p.floorLocation)     rows.push({ label: "Floor Location",     value: `${p.floorLocation} floor` });
-  if (p.numberOfFloors)    rows.push({ label: "Floors in Building", value: String(p.numberOfFloors) });
-  if (p.vaastuCompliance)  rows.push({ label: "Vaastu",             value: "Compliance required" });
 
-  // Two-column table — left half of slide
-  const tableW = W * 0.55;
-  const rowH   = Math.min(44, (H - 160) / Math.max(rows.length, 1));
-  let ty       = H - 120;
+  // A stat grid, not a spec table. Each fact gets a big value and a small
+  // label, so a client can read the whole slide in one glance instead of
+  // parsing rows.
+  const stats: { label: string; value: string }[] = [];
+  if (p.propertyType)     stats.push({ label: "PROPERTY TYPE",  value: p.propertyType });
+  if (p.numberOfBedrooms) stats.push({ label: "CONFIGURATION",  value: `${p.numberOfBedrooms} BHK` });
+  if (p.builtUpAreaSqm)   stats.push({ label: "BUILT-UP AREA",  value: `${p.builtUpAreaSqm} sqm` });
+  if (p.plotAreaSqm)      stats.push({ label: "PLOT AREA",      value: `${p.plotAreaSqm} sqm` });
+  if (p.floorLocation)    stats.push({ label: "FLOOR",          value: `${p.floorLocation}` });
+  if (p.numberOfFloors)   stats.push({ label: "FLOORS",         value: String(p.numberOfFloors) });
 
-  for (const [i, row] of rows.entries()) {
-    if (i % 2 === 0) {
-      page.drawRectangle({ x: M, y: ty - 8, width: tableW - M, height: rowH, color: C.altRow });
+  // Left 60% = stats, right 40% = compass.
+  const gridW  = W * 0.56 - M;
+  const cols   = 2;
+  const cardW  = (gridW - 20) / cols;
+  const cardH  = 92;
+  const gridTop = H - 210;
+
+  stats.slice(0, 6).forEach((s, i) => {
+    const cxp = M + (i % cols) * (cardW + 20);
+    const cyp = gridTop - Math.floor(i / cols) * (cardH + 16);
+
+    if (t.filledCards) {
+      page.drawRectangle({ x: cxp, y: cyp, width: cardW, height: cardH, color: t.panel });
+    } else {
+      page.drawLine({
+        start: { x: cxp, y: cyp }, end: { x: cxp + cardW, y: cyp },
+        thickness: 0.75, color: t.rule,
+      });
     }
-    page.drawText(row.label.toUpperCase(), {
-      x: M + 10, y: ty + 8, size: 8, font: bold, color: C.muted,
+    // Accent tick — a small brand cue that doesn't cost legibility.
+    page.drawRectangle({ x: cxp, y: cyp, width: 3, height: cardH, color: accent });
+
+    page.drawText(s.label, {
+      x: cxp + 18, y: cyp + cardH - 26, size: ts(t, TYPE.statLabel), font, color: t.muted,
     });
-    page.drawText(row.value, {
-      x: M + 200, y: ty + 8, size: 13, font, color: C.ink,
+    page.drawText(s.value, {
+      x: cxp + 18, y: cyp + 22, size: ts(t, TYPE.statValue), font: bold, color: t.ink,
     });
-    ty -= rowH;
-  }
+  });
 
   if (p.additionalNotes) {
-    ty -= 10;
-    page.drawText("NOTES", { x: M, y: ty, size: 8, font: bold, color: C.muted });
-    ty -= 16;
-    for (const line of wrapText(p.additionalNotes, font, 11, tableW - M * 2)) {
-      page.drawText(line, { x: M, y: ty, size: 11, font, color: C.ink });
-      ty -= 15;
+    const notesY = gridTop - Math.ceil(Math.min(stats.length, 6) / cols) * (cardH + 16) - 10;
+    if (notesY > M + 40) {
+      page.drawText("NOTES", { x: M, y: notesY, size: ts(t, TYPE.statLabel), font: bold, color: t.muted });
+      let ny = notesY - 18;
+      for (const line of wrapText(p.additionalNotes, font, ts(t, TYPE.body), gridW).slice(0, 2)) {
+        page.drawText(line, { x: M, y: ny, size: ts(t, TYPE.body), font, color: t.ink });
+        ny -= ts(t, TYPE.body) + 5;
+      }
     }
   }
 
-  // Compass rose — right side, sized to fill its dedicated panel
+  // ── Compass — right panel ──────────────────────────────────────────────
   if (p.facing) {
-    const cx = W * 0.785;
-    const cy = H * 0.52;
-    const r  = 108; // enlarged from 80 — fills the panel with real presence
+    const cx = W * 0.78;
+    const cy = H * 0.46;
+    const r  = 118;
 
-    // Soft filled dial behind the ring
-    page.drawCircle({ x: cx, y: cy, size: r + 4, color: C.altRow });
-    page.drawCircle({ x: cx, y: cy, size: r, borderColor: C.rule, borderWidth: 1.5, color: C.white });
+    page.drawCircle({ x: cx, y: cy, size: r + 6, color: t.panel });
+    page.drawCircle({
+      x: cx, y: cy, size: r,
+      borderColor: t.rule, borderWidth: 1.5,
+      color: t.filledCards ? t.white : t.pageBg,
+    });
 
-    // Tick marks at 8 compass points
     for (let deg = 0; deg < 360; deg += 45) {
       const rad2 = (deg * Math.PI) / 180;
       const isCardinal = deg % 90 === 0;
-      const innerR = isCardinal ? r - 12 : r - 7;
+      const innerR = isCardinal ? r - 14 : r - 8;
       page.drawLine({
         start: { x: cx + Math.cos(rad2) * innerR, y: cy + Math.sin(rad2) * innerR },
         end:   { x: cx + Math.cos(rad2) * r,      y: cy + Math.sin(rad2) * r },
-        thickness: isCardinal ? 1.2 : 0.6, color: C.muted,
+        thickness: isCardinal ? 1.2 : 0.6, color: t.muted,
       });
     }
 
     page.drawCircle({ x: cx, y: cy, size: 5, color: accent });
 
     const cardinals = [
-      { l: "N", dx: 0, dy: r + 18 }, { l: "S", dx: 0, dy: -r - 28 },
-      { l: "E", dx: r + 14, dy: -5 }, { l: "W", dx: -r - 28, dy: -5 },
+      { l: "N", dx: 0, dy: r + 20 }, { l: "S", dx: 0, dy: -r - 32 },
+      { l: "E", dx: r + 16, dy: -6 }, { l: "W", dx: -r - 32, dy: -6 },
     ];
     for (const c of cardinals) {
       const active = p.facing!.startsWith(c.l);
       page.drawText(c.l, {
         x: cx + c.dx - 5, y: cy + c.dy,
-        size: 14, font: active ? bold : font,
-        color: active ? accent : C.muted,
+        size: ts(t, 15), font: active ? bold : font,
+        color: active ? accent : t.muted,
       });
     }
 
@@ -439,27 +509,38 @@ async function addSiteContextSlide(
       "North-East": 45, "North-West": 135, "South-East": 315, "South-West": 225,
     };
     const rad = ((angles[p.facing] ?? 90) * Math.PI) / 180;
-    const tipX = cx + Math.cos(rad) * (r - 10);
-    const tipY = cy + Math.sin(rad) * (r - 10);
+    const tipX = cx + Math.cos(rad) * (r - 12);
+    const tipY = cy + Math.sin(rad) * (r - 12);
 
-    page.drawLine({
-      start: { x: cx, y: cy }, end: { x: tipX, y: tipY },
-      thickness: 3.5, color: accent,
-    });
+    page.drawLine({ start: { x: cx, y: cy }, end: { x: tipX, y: tipY }, thickness: 4, color: accent });
 
-    // Arrowhead at the pointer tip — two short lines rather than an SVG
-    // path (pdf-lib's drawSvgPath can render multi-segment paths
-    // unreliably; plain drawLine is guaranteed to work).
-    const headLen = 11, headAngle = 0.5;
+    // Arrowhead as two short lines — pdf-lib's drawSvgPath renders
+    // multi-segment paths unreliably.
+    const headLen = 12, headAngle = 0.5;
     const back1 = { x: tipX - headLen * Math.cos(rad - headAngle), y: tipY - headLen * Math.sin(rad - headAngle) };
     const back2 = { x: tipX - headLen * Math.cos(rad + headAngle), y: tipY - headLen * Math.sin(rad + headAngle) };
-    page.drawLine({ start: { x: tipX, y: tipY }, end: back1, thickness: 3.5, color: accent });
-    page.drawLine({ start: { x: tipX, y: tipY }, end: back2, thickness: 3.5, color: accent });
+    page.drawLine({ start: { x: tipX, y: tipY }, end: back1, thickness: 4, color: accent });
+    page.drawLine({ start: { x: tipX, y: tipY }, end: back2, thickness: 4, color: accent });
 
-    // Label below compass
-    page.drawText(`${p.facing} facing`, {
-      x: cx - bold.widthOfTextAtSize(`${p.facing} facing`, 9) / 2,
-      y: cy - r - 36, size: 9, font: bold, color: C.muted,
+    const facingLabel = `${p.facing.toUpperCase()} FACING`;
+    page.drawText(facingLabel, {
+      x: cx - bold.widthOfTextAtSize(facingLabel, ts(t, 12)) / 2,
+      y: cy - r - 52, size: ts(t, 12), font: bold, color: accent,
+    });
+
+    // Say what the orientation actually means for daily life — the compass
+    // alone is decoration to most clients.
+    const f = p.facing.toLowerCase();
+    const meaning = f.includes("east")
+      ? "Gentle morning sun, cooler afternoons."
+      : f.includes("north")
+      ? "Even, glare-free daylight all day."
+      : f.includes("west")
+      ? "Warm afternoon and evening light."
+      : "Balanced light through the day.";
+    page.drawText(meaning, {
+      x: cx - font.widthOfTextAtSize(meaning, ts(t, TYPE.caption)) / 2,
+      y: cy - r - 70, size: ts(t, TYPE.caption), font, color: t.muted,
     });
   }
 }
@@ -468,82 +549,116 @@ async function addSiteContextSlide(
 // Dark background, plan centered, room list on right side
 
 async function addPlanSlide(
-  doc: PDFDocument, project: Project, accent: RGB, font: PDFFont, bold: PDFFont,
+  doc: PDFDocument, project: Project, accent: RGB, t: PdfTheme, font: PDFFont, bold: PDFFont,
 ) {
   const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.bgDark });
-  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+  slideBackground(page, t, accent, true);
 
-  // Title — top left, on dark bg
+  const onFeature = isDarkSurface(t.featureBg);
+  const titleCol  = t.onFeature;
+  const mutedCol  = t.onFeatureMuted;
+
+  // This slide exists so the client can look at their home. The plan gets the
+  // space; the room list is a quiet sidebar, not a competing column.
   page.drawText("FLOOR PLAN", {
-    x: M, y: H - M - 4, size: 9, font: bold, color: accent,
+    x: M, y: H - M - 4, size: ts(t, TYPE.kicker), font: bold,
+    color: onFeature ? titleCol : accent,
   });
 
-  // Plan image — left 70% of slide
-  // Priority: AI render > color-coded render > original plan
-  const planW = W * 0.68;
-  const planH = H - 80;
+  const sidebarW = 210;
+  const planW    = W - sidebarW - M * 2 - 24;
+  const planTop  = H - M - 34;
+  const planBot  = M + 8;
+  const planH    = planTop - planBot;
+
+  // Priority: AI render > colour-coded render > original plan
   const planSource = project.aiRenderedPlanUrl ?? project.renderedPlanUrl ?? project.planImagePath;
 
-  try {
-    const imgBytes = await loadImageBytes(planSource);
-    if (!imgBytes) throw new Error("Could not load plan image");
-    // Try PNG first (most common for our plans), fall back to JPEG
-    const pdfImg = await doc.embedPng(imgBytes).catch(() => doc.embedJpg(imgBytes));
-    const dims     = pdfImg.scaleToFit(planW - M * 2, planH - 20);
-    const ix       = M + (planW - M * 2 - dims.width) / 2;
-    const iy       = (planH - dims.height) / 2 + 20;
-    page.drawImage(pdfImg, { x: ix, y: iy, width: dims.width, height: dims.height });
-  } catch {
-    // Fallback: try original plan if rendered failed
+  async function drawPlan(src: string | undefined): Promise<boolean> {
+    if (!src) return false;
     try {
-      const imgBytes = await loadImageBytes(project.planImagePath);
-      if (!imgBytes) throw new Error("fallback also failed");
+      const imgBytes = await loadImageBytes(src);
+      if (!imgBytes) return false;
       const pdfImg = await doc.embedPng(imgBytes).catch(() => doc.embedJpg(imgBytes));
-      const dims   = pdfImg.scaleToFit(planW - M * 2, planH - 20);
-      const ix     = M + (planW - M * 2 - dims.width) / 2;
-      const iy     = (planH - dims.height) / 2 + 20;
+      const dims   = pdfImg.scaleToFit(planW, planH);
+      const ix     = M + (planW - dims.width) / 2;
+      const iy     = planBot + (planH - dims.height) / 2;
+      // A light plate behind the plan keeps line drawings readable on dark
+      // presets — most uploaded plans are black-on-white.
+      if (onFeature) {
+        page.drawRectangle({
+          x: ix - 10, y: iy - 10, width: dims.width + 20, height: dims.height + 20,
+          color: t.white, opacity: 0.96,
+        });
+      }
       page.drawImage(pdfImg, { x: ix, y: iy, width: dims.width, height: dims.height });
+      return true;
     } catch {
-      page.drawRectangle({ x: M, y: 40, width: planW - M * 2, height: planH - 20,
-        color: rgb(0.2, 0.2, 0.2) });
-      page.drawText("[Floor Plan]", { x: planW / 2 - 40, y: H / 2, size: 12, font, color: C.muted });
+      return false;
     }
   }
 
-  // Room list — right panel
-  const rx     = planW + 16;
-  const rooms  = project.analysis?.rooms ?? [];
-  const rW     = W - planW - M - 16;
+  const ok = (await drawPlan(planSource)) || (await drawPlan(project.planImagePath));
+  if (!ok) {
+    page.drawRectangle({ x: M, y: planBot, width: planW, height: planH, color: t.panelOnFeature });
+    page.drawText("Floor plan unavailable", {
+      x: M + planW / 2 - 70, y: planBot + planH / 2,
+      size: ts(t, TYPE.body), font, color: mutedCol,
+    });
+  }
 
-  page.drawText("ROOMS", { x: rx, y: H - M - 4, size: 8, font: bold, color: C.muted });
+  // ── Room sidebar ───────────────────────────────────────────────────────
+  const rx    = W - M - sidebarW;
+  const rooms = project.analysis?.rooms ?? [];
+
+  page.drawText("ROOMS", {
+    x: rx, y: H - M - 4, size: ts(t, TYPE.statLabel), font: bold, color: mutedCol,
+  });
   page.drawLine({
-    start: { x: rx, y: H - M - 14 }, end: { x: rx + rW - 10, y: H - M - 14 },
-    thickness: 0.4, color: rgb(0.3, 0.3, 0.3),
+    start: { x: rx, y: H - M - 16 }, end: { x: W - M, y: H - M - 16 },
+    thickness: 0.6, color: t.ruleOnFeature,
   });
 
-  const maxRooms  = Math.min(rooms.length, 10);
-  const itemH     = Math.min(36, (H - 120) / Math.max(maxRooms, 1));
-  let roomY       = H - M - 28;
+  // Reserve room for the total block at the bottom, then fit what we can.
+  const listTop = H - M - 40;
+  const listBot = M + 54;
+  const rowH    = 26;
+  const maxRooms = Math.max(1, Math.min(rooms.length, Math.floor((listTop - listBot) / rowH)));
 
+  let roomY = listTop;
   for (let i = 0; i < maxRooms; i++) {
     const room = rooms[i];
-    page.drawText(room.name, { x: rx, y: roomY, size: 10, font, color: C.light });
+    page.drawText(room.name, {
+      x: rx, y: roomY, size: ts(t, TYPE.caption), font, color: titleCol,
+    });
     if (room.sizeEstimateSqm) {
       const sqmStr = `${room.sizeEstimateSqm} m²`;
-      const sqmW   = font.widthOfTextAtSize(sqmStr, 9);
-      page.drawText(sqmStr, { x: rx + rW - sqmW - 10, y: roomY, size: 9, font, color: C.muted });
+      const sqmW   = font.widthOfTextAtSize(sqmStr, ts(t, TYPE.caption));
+      page.drawText(sqmStr, {
+        x: W - M - sqmW, y: roomY, size: ts(t, TYPE.caption), font, color: mutedCol,
+      });
     }
-    page.drawLine({
-      start: { x: rx, y: roomY - 8 }, end: { x: rx + rW - 10, y: roomY - 8 },
-      thickness: 0.3, color: rgb(0.25, 0.25, 0.25),
+    roomY -= rowH;
+  }
+
+  // Be honest when the sidebar can't show everything, rather than silently
+  // truncating the list.
+  if (rooms.length > maxRooms) {
+    page.drawText(`+ ${rooms.length - maxRooms} more`, {
+      x: rx, y: roomY + 4, size: ts(t, 9), font, color: mutedCol,
     });
-    roomY -= itemH;
   }
 
   if (project.analysis?.totalAreaSqm) {
-    page.drawText(`Total  ·  ${project.analysis.totalAreaSqm} m²`, {
-      x: rx, y: M + 20, size: 9, font: bold, color: accent,
+    page.drawLine({
+      start: { x: rx, y: M + 42 }, end: { x: W - M, y: M + 42 },
+      thickness: 0.6, color: t.ruleOnFeature,
+    });
+    page.drawText("TOTAL AREA", {
+      x: rx, y: M + 26, size: ts(t, 8.5), font, color: mutedCol,
+    });
+    page.drawText(`${project.analysis.totalAreaSqm} m²`, {
+      x: rx, y: M + 4, size: ts(t, 18), font: bold, color: accent,
     });
   }
 }
@@ -553,67 +668,54 @@ async function addPlanSlide(
 
 async function addStrengthsSlide(
   doc: PDFDocument, project: Project, strengths: string[],
-  accent: RGB, font: PDFFont, bold: PDFFont,
+  accent: RGB, t: PdfTheme, font: PDFFont, bold: PDFFont,
 ) {
   const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.bg });
-  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+  slideBackground(page, t, accent);
 
-  slideTitle(page, "PLAN STRENGTHS", font, bold, accent);
+  const italic = font;
+  const bodyTop = slideHeader(page, {
+    kicker: "Plan Strengths",
+    headline: "Why this plan works",
+  }, t, font, bold, italic, accent);
 
-  page.drawText(`What makes ${project.name} work for you`, {
-    x: M, y: H - 90, size: 11, font, color: C.muted,
-  });
+  // Capped at 5 and set in a single column. Two columns of six 11pt bullets
+  // gave the eye no order to read in; a short numbered list does.
+  const items = strengths.slice(0, 5);
+  const rowH  = Math.min(96, (bodyTop - M - 30) / Math.max(items.length, 1));
+  const textW = W - M * 2 - 90;
 
-  // Two-column layout
-  const colW     = (W - M * 2 - 32) / 2;
-  const maxItems = Math.min(strengths.length, 6);
-  const col1     = strengths.slice(0, Math.ceil(maxItems / 2));
-  const col2     = strengths.slice(Math.ceil(maxItems / 2), maxItems);
+  items.forEach((text, i) => {
+    const y = bodyTop - i * rowH;
 
-  function drawBullets(bullets: string[], xStart: number, startNum: number) {
-    let y = H - 130;
-    for (const [i, text] of bullets.entries()) {
-      // Number — continuous across both columns, not reset per column
-      page.drawText(String(startNum + i).padStart(2, "0"), {
-        x: xStart, y, size: 20, font: bold, color: C.rule,
-      });
-      // Text — wrapped
-      const lines = wrapText(text, font, 11, colW - 44);
-      let lineY = y + 3;
-      for (const line of lines) {
-        page.drawText(line, { x: xStart + 44, y: lineY, size: 11, font, color: C.ink });
-        lineY -= 15;
-      }
-      // Rule
-      const blockH = Math.max(38, lines.length * 15 + 16);
-      page.drawLine({
-        start: { x: xStart, y: y - blockH + 18 },
-        end:   { x: xStart + colW, y: y - blockH + 18 },
-        thickness: 0.4, color: C.rule,
-      });
-      y -= blockH + 10;
+    page.drawText(String(i + 1).padStart(2, "0"), {
+      x: M, y: y - 20, size: ts(t, TYPE.numeral), font: bold, color: accent, opacity: 0.35,
+    });
+
+    const lines = wrapText(text, font, ts(t, 14), textW);
+    let lineY = y - 8;
+    for (const line of lines.slice(0, 3)) {
+      page.drawText(line, { x: M + 78, y: lineY, size: ts(t, 14), font, color: t.ink });
+      lineY -= ts(t, 14) + 6;
     }
-  }
 
-  drawBullets(col1, M, 1);
-  drawBullets(col2, M + colW + 32, col1.length + 1);
-
-  // Room tags — sit clear of the global footer band
-  const roomTags = (project.analysis?.rooms ?? []).map((r) => r.name).join("  ·  ");
-  if (roomTags) {
-    page.drawText(roomTags, { x: M, y: M + FOOTER_H + 14, size: 8, font, color: C.muted });
-  }
+    if (i < items.length - 1) {
+      page.drawLine({
+        start: { x: M + 78, y: y - rowH + 26 }, end: { x: W - M, y: y - rowH + 26 },
+        thickness: 0.5, color: t.rule,
+      });
+    }
+  });
 }
 
 // ─── 5. Moodboard slide ───────────────────────────────────────────────────────
 // Full-bleed image, dark gradient overlay, room name + notes at bottom
 
 async function addMoodboardSlide(
-  doc: PDFDocument, mb: Moodboard, accent: RGB, font: PDFFont, bold: PDFFont,
+  doc: PDFDocument, mb: Moodboard, accent: RGB, t: PdfTheme, font: PDFFont, bold: PDFFont,
 ) {
   const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.bgDark });
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: t.featureBg });
 
   // Full-bleed image
   try {
@@ -646,7 +748,7 @@ async function addMoodboardSlide(
 
   // Room label — bottom left
   page.drawText(mb.roomName.toUpperCase(), {
-    x: M, y: 72, size: 26, font: bold, color: C.white,
+    x: M, y: 72, size: 26, font: bold, color: ON_IMAGE,
   });
 
   // Thin rule above label
@@ -670,12 +772,13 @@ async function addOverallMoodboardSlide(
   overall: OverallMoodboard,
   project: Project,
   accent: RGB,
+  t: PdfTheme,
   font: PDFFont,
   bold: PDFFont,
   italic: PDFFont,
 ) {
   const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.bgDark });
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: t.featureBg });
   page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
 
   // Title bar
@@ -686,10 +789,10 @@ async function addOverallMoodboardSlide(
   // Style name + statement
   const styleName = project.styleProfile?.overallStyle ?? "Modern";
   page.drawText(styleName.toUpperCase(), {
-    x: M, y: H - M - 22, size: 20, font: bold, color: C.white,
+    x: M, y: H - M - 22, size: 20, font: bold, color: ON_IMAGE,
   });
   page.drawText(`"${overall.styleStatement}"`, {
-    x: M, y: H - M - 40, size: 10, font: italic, color: C.light, opacity: 0.7,
+    x: M, y: H - M - 40, size: 10, font: italic, color: ON_IMAGE_MUTED, opacity: 0.7,
   });
 
   // 2×2 image grid — right 60% of slide, top to bottom
@@ -730,7 +833,7 @@ async function addOverallMoodboardSlide(
       // Caption overlay
       page.drawRectangle({ x: pos.x, y: pos.y, width: gW, height: 22, color: rgb(0,0,0), opacity: 0.55 });
       page.drawText((img.caption ?? "").toUpperCase(), {
-        x: pos.x + 8, y: pos.y + 7, size: 7, font, color: C.white, opacity: 0.8,
+        x: pos.x + 8, y: pos.y + 7, size: 7, font, color: ON_IMAGE, opacity: 0.8,
       });
     } catch { /* skip */ }
   }
@@ -747,7 +850,7 @@ async function addOverallMoodboardSlide(
   for (const tag of tags) {
     page.drawRectangle({ x: tx, y: tagY, width: font.widthOfTextAtSize(tag, 8) + 16, height: 18,
       borderColor: accent, borderWidth: 0.5 });
-    page.drawText(tag.toUpperCase(), { x: tx + 8, y: tagY + 6, size: 8, font, color: C.light });
+    page.drawText(tag.toUpperCase(), { x: tx + 8, y: tagY + 6, size: 8, font, color: ON_IMAGE_MUTED });
     tx += font.widthOfTextAtSize(tag, 8) + 28;
   }
 }
@@ -760,22 +863,23 @@ async function addRoomMoodboardSlide(
   rm: RoomMoodboard,
   project: Project,
   accent: RGB,
+  t: PdfTheme,
   font: PDFFont,
   bold: PDFFont,
 ) {
   const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.bg });
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: t.pageBg });
   page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
 
   // Room title
   page.drawRectangle({ x: M, y: H - M - 10, width: 4, height: 14, color: accent });
   page.drawText(rm.roomName.toUpperCase(), {
-    x: M + 12, y: H - M - 5, size: 12, font: bold, color: C.ink,
+    x: M + 12, y: H - M - 5, size: 12, font: bold, color: t.ink,
   });
   page.drawLine({
     start: { x: M, y: H - M - 22 },
     end:   { x: W - M, y: H - M - 22 },
-    thickness: 0.5, color: C.rule,
+    thickness: 0.5, color: t.rule,
   });
 
   // ── Left panel: plan snippet ─────────────────────────────────────────────
@@ -788,17 +892,17 @@ async function addRoomMoodboardSlide(
   const roomDetail = project.analysis?.rooms.find((r) => r.name === rm.roomName);
   if (roomDetail?.sizeEstimateSqm) {
     page.drawText(`${roomDetail.sizeEstimateSqm} sqm`, {
-      x: M, y: H - M - 42, size: 11, font: bold, color: C.ink,
+      x: M, y: H - M - 42, size: 11, font: bold, color: t.ink,
     });
   }
   if (roomDetail?.orientation) {
     page.drawText(roomDetail.orientation, {
-      x: M, y: H - M - 58, size: 9, font, color: C.muted,
+      x: M, y: H - M - 58, size: 9, font, color: t.muted,
     });
   }
   if (roomDetail?.notes) {
     page.drawText(roomDetail.notes, {
-      x: M, y: H - M - 72, size: 8, font, color: C.muted,
+      x: M, y: H - M - 72, size: 8, font, color: t.muted,
     });
   }
 
@@ -813,7 +917,7 @@ async function addRoomMoodboardSlide(
         const sx   = M + (leftW - M - 8 - dims.width) / 2;
         const sy   = planBotY + (planH - dims.height) / 2;
         page.drawRectangle({ x: sx - 4, y: sy - 4, width: dims.width + 8, height: dims.height + 8,
-          color: C.white, borderColor: C.rule, borderWidth: 0.5 });
+          color: t.white, borderColor: t.rule, borderWidth: 0.5 });
         page.drawImage(pImg, { x: sx, y: sy, width: dims.width, height: dims.height });
       }
     } catch { /* skip */ }
@@ -826,13 +930,13 @@ async function addRoomMoodboardSlide(
       const sx   = M + (leftW - M - 8 - dims.width) / 2;
       const sy   = planBotY + (planH - dims.height) / 2;
       page.drawRectangle({ x: sx - 4, y: sy - 4, width: dims.width + 8, height: dims.height + 8,
-        color: C.white, borderColor: C.rule, borderWidth: 0.5 });
+        color: t.white, borderColor: t.rule, borderWidth: 0.5 });
       page.drawImage(pImg, { x: sx, y: sy, width: dims.width, height: dims.height });
-      page.drawText("Full plan reference", { x: sx, y: sy - 14, size: 6.5, font, color: C.muted });
+      page.drawText("Full plan reference", { x: sx, y: sy - 14, size: 6.5, font, color: t.muted });
     } catch {
       page.drawRectangle({ x: M, y: planBotY, width: leftW - M - 8, height: planH,
-        color: C.altRow, borderColor: C.rule, borderWidth: 0.5 });
-      page.drawText("PLAN", { x: M + 12, y: planBotY + planH / 2, size: 8, font, color: C.muted });
+        color: t.panel, borderColor: t.rule, borderWidth: 0.5 });
+      page.drawText("PLAN", { x: M + 12, y: planBotY + planH / 2, size: 8, font, color: t.muted });
     }
   }
 
@@ -840,7 +944,7 @@ async function addRoomMoodboardSlide(
   if (roomDetail?.specialFeatures?.length) {
     let fy = M + FOOTER_H + 24;
     for (const feat of roomDetail.specialFeatures.slice(0, 3)) {
-      page.drawText(`· ${feat}`, { x: M, y: fy, size: 8, font, color: C.muted });
+      page.drawText(`· ${feat}`, { x: M, y: fy, size: 8, font, color: t.muted });
       fy -= 12;
     }
   }
@@ -876,7 +980,7 @@ async function addRoomMoodboardSlide(
       const dx     = ix - (dw - imgW) / 2;
       const dy     = (topY - imgH) - (dh - imgH) / 2;
 
-      page.drawRectangle({ x: ix, y: topY - imgH, width: imgW, height: imgH, color: C.altRow });
+      page.drawRectangle({ x: ix, y: topY - imgH, width: imgW, height: imgH, color: t.panel });
       drawClippedImage(page, pImg, { x: dx, y: dy, width: dw, height: dh },
         { x: ix, y: topY - imgH, width: imgW, height: imgH });
 
@@ -884,7 +988,7 @@ async function addRoomMoodboardSlide(
       page.drawRectangle({ x: ix, y: topY - imgH, width: imgW, height: 18,
         color: rgb(0,0,0), opacity: 0.5 });
       page.drawText((img.caption ?? "").toUpperCase(), {
-        x: ix + 6, y: topY - imgH + 5, size: 7, font, color: C.white, opacity: 0.85,
+        x: ix + 6, y: topY - imgH + 5, size: 7, font, color: ON_IMAGE, opacity: 0.85,
       });
     } catch { /* skip */ }
   }
@@ -903,14 +1007,14 @@ async function addRoomMoodboardSlide(
           const dx    = rx - (dw - rW) / 2;
           const dy    = bottomY - (dh - stripH) / 2;
 
-          page.drawRectangle({ x: rx, y: bottomY, width: rW, height: stripH, color: C.altRow });
+          page.drawRectangle({ x: rx, y: bottomY, width: rW, height: stripH, color: t.panel });
           drawClippedImage(page, pImg, { x: dx, y: dy, width: dw, height: dh },
             { x: rx, y: bottomY, width: rW, height: stripH });
 
           page.drawRectangle({ x: rx, y: bottomY, width: rW, height: 20,
             color: rgb(0,0,0), opacity: 0.55 });
           page.drawText((img.caption ?? "").toUpperCase(), {
-            x: rx + 8, y: bottomY + 7, size: 7, font, color: C.white, opacity: 0.85,
+            x: rx + 8, y: bottomY + 7, size: 7, font, color: ON_IMAGE, opacity: 0.85,
           });
         }
       }
@@ -1001,14 +1105,69 @@ async function loadImageBytes(pathOrUrl: string): Promise<Buffer | null> {
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
-function slideTitle(page: PDFPage, title: string, font: PDFFont, bold: PDFFont, accent: RGB) {
-  page.drawRectangle({ x: M, y: H - M - 10, width: 4, height: 14, color: accent });
-  page.drawText(title, { x: M + 12, y: H - M - 5, size: 10, font: bold, color: accent });
-  page.drawLine({
-    start: { x: M, y: H - M - 22 },
-    end:   { x: W - M, y: H - M - 22 },
-    thickness: 0.5, color: C.rule,
+/**
+ * Standard slide header: small accent kicker, then a large headline, then an
+ * optional supporting line.
+ *
+ * The old `slideTitle` drew a single 10pt label and nothing else, so every
+ * slide opened with the same whisper and no hierarchy. Clients had no visual
+ * entry point. Returns the y-coordinate where body content may begin.
+ */
+function slideHeader(
+  page: PDFPage,
+  opts: {
+    kicker: string;
+    headline: string;
+    subhead?: string;
+    onFeature?: boolean;
+  },
+  t: PdfTheme,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont,
+  accent: RGB,
+): number {
+  const onFeature  = opts.onFeature ?? false;
+  const headColor  = onFeature ? t.onFeature : t.ink;
+  const subColor   = onFeature ? t.onFeatureMuted : t.muted;
+  // On dark surfaces a saturated brand accent can fall below contrast; the
+  // light body colour reads more reliably for the small kicker.
+  const kickColor  = onFeature && isDarkSurface(t.featureBg) ? t.onFeature : accent;
+
+  let y = H - M - 6;
+
+  page.drawText(opts.kicker.toUpperCase(), {
+    x: M, y, size: ts(t, TYPE.kicker), font: bold, color: kickColor,
   });
+
+  y -= ts(t, TYPE.headline) + 10;
+  page.drawText(opts.headline, {
+    x: M, y, size: ts(t, TYPE.headline), font: bold, color: headColor,
+  });
+
+  if (opts.subhead) {
+    y -= ts(t, TYPE.subhead) + 10;
+    const lines = wrapText(opts.subhead, italic, ts(t, TYPE.subhead), W - M * 2 - 220);
+    for (const line of lines.slice(0, 2)) {
+      page.drawText(line, { x: M, y, size: ts(t, TYPE.subhead), font: italic, color: subColor });
+      y -= ts(t, TYPE.subhead) + 4;
+    }
+  }
+
+  return y - 26;
+}
+
+/** Rough luminance test — decides whether a surface needs light text. */
+function isDarkSurface(c: RGB): boolean {
+  return 0.299 * c.red + 0.587 * c.green + 0.114 * c.blue < 0.5;
+}
+
+/** Paint the slide background + optional top accent bar. */
+function slideBackground(page: PDFPage, t: PdfTheme, accent: RGB, feature = false) {
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: feature ? t.featureBg : t.pageBg });
+  if (t.accentBar) {
+    page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+  }
 }
 
 function addSlideFooter(
@@ -1019,28 +1178,22 @@ function addSlideFooter(
   total: number,
   firm: FirmProfile | null,
   accent: RGB,
+  t: PdfTheme,
 ) {
-  const firmName    = firm?.name ?? "Architecture Studio";
-  const firmTagline = firm?.tagline ?? "";
-  const contact     = [firm?.email, firm?.phone, firm?.website].filter(Boolean).join("  ·  ");
+  // The footer sits on whatever surface the slide used, so pick a text colour
+  // that survives both. Sampling the page's own background is not possible
+  // via pdf-lib, so feature slides pass their own footer treatment instead:
+  // this uses the muted tone that works on both in every preset.
+  const firmName = firm?.name ?? "Architecture Studio";
+  const label    = `${pageNum} / ${total}`;
+  const labelW   = font.widthOfTextAtSize(label, ts(t, TYPE.footer));
 
-  // Footer rule
-  page.drawLine({
-    start: { x: M, y: M + 24 }, end: { x: W - M, y: M + 24 },
-    thickness: 0.4, color: C.rule,
+  page.drawText(firmName, {
+    x: M, y: M - 6, size: ts(t, TYPE.footer), font: bold, color: accent, opacity: 0.75,
   });
-
-  // Left: firm identity
-  const firmLine = firmTagline ? `${firmName}  ·  ${firmTagline}` : firmName;
-  page.drawText(firmLine, { x: M, y: M + 12, size: 7.5, font: bold, color: C.muted });
-  if (contact) {
-    page.drawText(contact, { x: M, y: M + 2, size: 6.5, font, color: C.muted });
-  }
-
-  // Right: page number
-  const label = `${pageNum} / ${total}`;
-  const labelW = font.widthOfTextAtSize(label, 7.5);
-  page.drawText(label, { x: W - M - labelW, y: M + 12, size: 7.5, font, color: C.muted });
+  page.drawText(label, {
+    x: W - M - labelW, y: M - 6, size: ts(t, TYPE.footer), font, color: accent, opacity: 0.75,
+  });
 }
 
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
@@ -1085,6 +1238,7 @@ async function addRoomWalkthroughSlide(
   doc: PDFDocument,
   project: Project,
   accent: RGB,
+  t: PdfTheme,
   font: PDFFont,
   bold: PDFFont,
   italic: PDFFont
@@ -1092,80 +1246,98 @@ async function addRoomWalkthroughSlide(
   const rooms = project.analysis?.rooms ?? [];
   if (rooms.length === 0) return;
 
-  const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
-  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+  // Six room cards per slide (2 columns × 3 rows), paginating across as many
+  // slides as the home needs.
+  //
+  // The previous version tried to cram EVERY room onto a single slide in two
+  // dense columns and `break`ed out of the loop when it ran out of vertical
+  // space — so any room past roughly the tenth was silently dropped from the
+  // deck. Cards also let the narrative breathe at readable body size.
+  const PER_SLIDE = 6;
+  const COLS = 2;
+  const ROWS = 3;
 
-  page.drawText("A WALK THROUGH YOUR HOME", {
-    x: M, y: H - M - 4, size: 9, font: bold, color: accent,
-  });
-
-  // Personalized subtitle using client brief
   const brief = project.plotInfo;
   const subtitle = brief?.familyDetails
     ? `Designed for ${brief.familyDetails}${brief.priorities ? ` — prioritising ${brief.priorities.toLowerCase()}` : ""}.`
     : "Every room has been designed with purpose.";
-  const subLines = wrapText(subtitle, italic, 9, W - M * 2);
-  subLines.slice(0, 2).forEach((line, i) => {
-    page.drawText(line, { x: M, y: H - M - 22 - i * 12, size: 9, font: italic, color: C.muted });
-  });
 
-  // Two-column room descriptions
-  const colW = (W - M * 3) / 2;
-  const startY = H - M - 50;
-  let col = 0;
-  let y = startY;
-  const lineH = 13;
-  const roomGap = 24;
+  const totalSlides = Math.ceil(rooms.length / PER_SLIDE);
 
-  for (const room of rooms) {
-    const x = M + col * (colW + M);
+  for (let s = 0; s < totalSlides; s++) {
+    const slice = rooms.slice(s * PER_SLIDE, (s + 1) * PER_SLIDE);
+    const page = doc.addPage([W, H]);
+    slideBackground(page, t, accent, true);
 
-    // Room name
-    page.drawText(room.name.toUpperCase(), {
-      x, y, size: 8, font: bold, color: accent,
-    });
-    y -= 3;
+    const onFeature = isDarkSurface(t.featureBg);
 
-    // Separator line
-    page.drawLine({
-      start: { x, y }, end: { x: x + colW * 0.3, y },
-      thickness: 0.5, color: rgb(0.3, 0.3, 0.3),
-    });
-    y -= lineH;
+    const bodyTop = slideHeader(page, {
+      kicker: totalSlides > 1 ? `A Walk Through Your Home · ${s + 1} of ${totalSlides}` : "A Walk Through Your Home",
+      headline: s === 0 ? "Room by room" : "Room by room, continued",
+      subhead: s === 0 ? subtitle : undefined,
+      onFeature: true,
+    }, t, font, bold, italic, accent);
 
-    // Use architect-edited narrative if available, otherwise auto-generate
-    const desc = project.roomNarratives?.[room.name] ?? buildRoomNarrative(room, project.plotInfo);
-    const lines = wrapText(desc, font, 8.5, colW - 10);
+    const gapX  = 28;
+    const gapY  = 18;
+    const cardW = (W - M * 2 - gapX) / COLS;
+    const availH = bodyTop - M - 24;
+    const cardH = Math.min(150, (availH - gapY * (ROWS - 1)) / ROWS);
 
-    for (const line of lines.slice(0, 4)) { // max 4 lines per room
-      page.drawText(line, { x, y, size: 8.5, font, color: C.light });
-      y -= lineH;
-    }
+    slice.forEach((room, i) => {
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const x = M + col * (cardW + gapX);
+      const y = bodyTop - row * (cardH + gapY) - cardH;
 
-    y -= roomGap - lineH;
-
-    // Switch column or page if we run out of space
-    if (y < M + 40) {
-      if (col === 0) {
-        col = 1;
-        y = startY;
-      } else {
-        // Need a new page
-        col = 0;
-        y = startY;
-        // Start fresh page for remaining rooms
-        const nextPage = doc.addPage([W, H]);
-        nextPage.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
-        nextPage.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
-        nextPage.drawText("YOUR HOME — CONTINUED", {
-          x: M, y: H - M - 4, size: 9, font: bold, color: accent,
-        });
-        // Reassign page reference for subsequent drawing
-        // (pdf-lib requires drawing on the returned page object)
-        break; // For now, limit to one page of walkthrough
+      if (t.filledCards) {
+        page.drawRectangle({ x, y, width: cardW, height: cardH, color: t.panelOnFeature });
       }
-    }
+      page.drawRectangle({ x, y, width: 3, height: cardH, color: accent });
+
+      const padX = 18;
+      let cy = y + cardH - 26;
+
+      page.drawText(room.name.toUpperCase(), {
+        x: x + padX, y: cy,
+        size: ts(t, TYPE.cardTitle), font: bold,
+        color: onFeature ? t.onFeature : t.ink,
+      });
+
+      if (room.sizeEstimateSqm) {
+        const areaStr = `${room.sizeEstimateSqm} m²`;
+        const aW = font.widthOfTextAtSize(areaStr, ts(t, TYPE.caption));
+        page.drawText(areaStr, {
+          x: x + cardW - padX - aW, y: cy + 2,
+          size: ts(t, TYPE.caption), font,
+          color: onFeature ? t.onFeatureMuted : t.muted,
+        });
+      }
+
+      cy -= 18;
+      page.drawLine({
+        start: { x: x + padX, y: cy }, end: { x: x + cardW - padX, y: cy },
+        thickness: 0.5, color: t.ruleOnFeature,
+      });
+      cy -= ts(t, TYPE.body) + 6;
+
+      const desc = project.roomNarratives?.[room.name] ?? buildRoomNarrative(room, project.plotInfo);
+      const maxLines = Math.max(1, Math.floor((cy - y - 12) / (ts(t, TYPE.body) + 4)) + 1);
+      const lines = wrapText(desc, font, ts(t, TYPE.body), cardW - padX * 2);
+
+      lines.slice(0, maxLines).forEach((line, li) => {
+        // If the narrative is longer than the card, ellipsise the last visible
+        // line rather than cutting mid-sentence with no signal.
+        const isLast = li === maxLines - 1 && lines.length > maxLines;
+        page.drawText(isLast ? `${line}…` : line, {
+          x: x + padX, y: cy,
+          size: ts(t, TYPE.body), font,
+          color: onFeature ? t.onFeature : t.ink,
+          opacity: onFeature ? 0.88 : 1,
+        });
+        cy -= ts(t, TYPE.body) + 4;
+      });
+    });
   }
 }
 
@@ -1186,6 +1358,7 @@ async function addSpatialHighlightsSlide(
   doc: PDFDocument,
   project: Project,
   accent: RGB,
+  t: PdfTheme,
   font: PDFFont,
   bold: PDFFont,
   italic: PDFFont
@@ -1194,21 +1367,19 @@ async function addSpatialHighlightsSlide(
   if (rooms.length === 0) return;
 
   const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
-  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
-
-  page.drawText("WHY THIS PLAN WORKS", {
-    x: M, y: H - M - 4, size: 9, font: bold, color: accent,
-  });
+  slideBackground(page, t, accent);
 
   // Personalized subtitle
   const brief = project.plotInfo;
   const highlightSub = brief?.lifestyle
     ? `How this home supports your lifestyle — ${brief.lifestyle.toLowerCase()}.`
     : "The key design decisions that make this home work for everyday life.";
-  page.drawText(highlightSub, {
-    x: M, y: H - M - 22, size: 10, font: italic, color: C.muted,
-  });
+
+  const bodyTop = slideHeader(page, {
+    kicker: "Why This Plan Works",
+    headline: "Built around how you live",
+    subhead: highlightSub,
+  }, t, font, bold, italic, accent);
 
   // Build meaningful insights instead of raw stats
   const insights: { icon: string; title: string; detail: string }[] = [];
@@ -1329,44 +1500,169 @@ async function addSpatialHighlightsSlide(
     });
   }
 
-  // Render insights as rows
-  const startY = H - M - 55;
-  const rowH = 52;
+  // Render insights as two-column cards. Four is the cap: a client will read
+  // four reasons, and skim ten.
+  //
+  // De-duplicate first — several branches above emit icon "06", and lifestyle
+  // and priorities can independently produce near-identical cards.
+  const seen = new Set<string>();
+  const unique = insights.filter((ins) => {
+    const key = ins.title.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
-  insights.slice(0, 5).forEach((insight, i) => {
-    const y = startY - i * rowH;
+  const shown = unique.slice(0, 4);
+  const COLS  = 2;
+  const gapX  = 28;
+  const gapY  = 22;
+  const cardW = (W - M * 2 - gapX) / COLS;
+  const rows  = Math.ceil(shown.length / COLS);
+  const cardH = Math.min(150, (bodyTop - M - 20 - gapY * (rows - 1)) / Math.max(rows, 1));
 
-    // Icon circle
-    page.drawCircle({
-      x: M + 14, y: y - 4, size: 12,
-      color: accent, opacity: 0.15,
-    });
-    page.drawText(insight.icon, {
-      x: M + 9, y: y - 8, size: 11, font: bold, color: accent,
-    });
+  shown.forEach((insight, i) => {
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
+    const x = M + col * (cardW + gapX);
+    const y = bodyTop - row * (cardH + gapY) - cardH;
 
-    // Title
-    page.drawText(insight.title.toUpperCase(), {
-      x: M + 38, y: y, size: 8, font: bold, color: C.light,
-    });
-
-    // Detail
-    const detailLines = wrapText(insight.detail, font, 8.5, W - M * 2 - 50);
-    detailLines.slice(0, 2).forEach((line, li) => {
-      page.drawText(line, {
-        x: M + 38, y: y - 14 - li * 11, size: 8.5, font, color: C.muted,
-      });
-    });
-
-    // Divider
-    if (i < insights.length - 1) {
-      page.drawLine({
-        start: { x: M + 38, y: y - rowH + 12 },
-        end: { x: W - M, y: y - rowH + 12 },
-        thickness: 0.3, color: rgb(0.2, 0.2, 0.2),
+    if (t.filledCards) {
+      page.drawRectangle({ x, y, width: cardW, height: cardH, color: t.panel });
+    } else {
+      page.drawRectangle({
+        x, y, width: cardW, height: cardH,
+        borderColor: t.rule, borderWidth: 0.75,
       });
     }
+
+    const padX = 22;
+
+    // Numeral, sized as a quiet index rather than an icon.
+    page.drawText(String(i + 1).padStart(2, "0"), {
+      x: x + padX, y: y + cardH - 34,
+      size: ts(t, 22), font: bold, color: accent, opacity: 0.4,
+    });
+
+    const titleLines = wrapText(insight.title, bold, ts(t, TYPE.cardTitle), cardW - padX * 2 - 46);
+    let ty = y + cardH - 30;
+    titleLines.slice(0, 2).forEach((line) => {
+      page.drawText(line, {
+        x: x + padX + 46, y: ty,
+        size: ts(t, TYPE.cardTitle), font: bold, color: t.ink,
+      });
+      ty -= ts(t, TYPE.cardTitle) + 3;
+    });
+
+    let dy = ty - 12;
+    const maxLines = Math.max(1, Math.floor((dy - y - 14) / (ts(t, TYPE.body) + 4)) + 1);
+    wrapText(insight.detail, font, ts(t, TYPE.body), cardW - padX * 2)
+      .slice(0, maxLines)
+      .forEach((line) => {
+        page.drawText(line, {
+          x: x + padX, y: dy, size: ts(t, TYPE.body), font, color: t.muted,
+        });
+        dy -= ts(t, TYPE.body) + 4;
+      });
   });
+}
+
+// ─── Closing slide ────────────────────────────────────────────────────────────
+//
+// Answers "what do I do next?". The deck previously just stopped after the
+// last content slide, leaving the client with no call to action.
+
+async function addThankYouSlide(
+  doc: PDFDocument,
+  project: Project,
+  firm: FirmProfile | null,
+  accent: RGB,
+  t: PdfTheme,
+  font: PDFFont,
+  bold: PDFFont,
+  italic: PDFFont,
+) {
+  const page = doc.addPage([W, H]);
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: t.featureBg });
+  if (t.accentBar) {
+    page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+  }
+
+  const onFeature = isDarkSurface(t.featureBg);
+  const titleCol  = onFeature ? t.onFeature : t.ink;
+  const mutedCol  = onFeature ? t.onFeatureMuted : t.muted;
+
+  page.drawText("THANK YOU", {
+    x: M, y: H - M - 4, size: ts(t, TYPE.kicker), font: bold,
+    color: onFeature ? t.onFeature : accent,
+  });
+
+  const headline = "Let's talk about your home";
+  page.drawText(headline, {
+    x: M, y: H * 0.60, size: ts(t, 42), font: bold, color: titleCol,
+  });
+
+  const sub = `We'd love to hear your thoughts on this concept for ${project.name}.`;
+  page.drawText(sub, {
+    x: M, y: H * 0.60 - 34, size: ts(t, TYPE.subhead), font: italic, color: mutedCol,
+  });
+
+  page.drawLine({
+    start: { x: M, y: H * 0.60 - 60 }, end: { x: M + 120, y: H * 0.60 - 60 },
+    thickness: 2, color: accent,
+  });
+
+  // Contact block — phone first: in practice clients call.
+  let cy = H * 0.60 - 100;
+  const contacts: { label: string; value: string }[] = [];
+  if (firm?.phone)   contacts.push({ label: "CALL US",   value: firm.phone });
+  if (firm?.email)   contacts.push({ label: "EMAIL",     value: firm.email });
+  if (firm?.website) contacts.push({ label: "WEBSITE",   value: firm.website });
+
+  for (const c of contacts) {
+    page.drawText(c.label, { x: M, y: cy, size: ts(t, 8.5), font, color: mutedCol });
+    page.drawText(c.value, { x: M, y: cy - 20, size: ts(t, 17), font: bold, color: titleCol });
+    cy -= 54;
+  }
+
+  // Firm lockup — bottom right
+  const firmName = (firm?.name ?? project.firmName).toUpperCase();
+  const fnW = bold.widthOfTextAtSize(firmName, ts(t, 12));
+  page.drawText(firmName, {
+    x: W - M - fnW, y: M + 4, size: ts(t, 12), font: bold, color: titleCol,
+  });
+  if (firm?.tagline) {
+    const tgW = font.widthOfTextAtSize(firm.tagline, ts(t, TYPE.caption));
+    page.drawText(firm.tagline, {
+      x: W - M - tgW, y: M - 12, size: ts(t, TYPE.caption), font, color: mutedCol,
+    });
+  }
+
+  // QR to the live, always-current version of this presentation.
+  if (project.shareToken && project.shareEnabled !== false) {
+    try {
+      const { generateQrMatrix, drawQrOnPage } = await import("@/lib/qr");
+      const shareUrl = `${process.env.APP_URL ?? "https://archpresent.vercel.app"}/share/${project.shareToken}`;
+      const qrMatrix = generateQrMatrix(shareUrl);
+      const qrSize = 3.0;
+      const qrTotal = qrMatrix.length * qrSize;
+      const qrX = W - M - qrTotal;
+      const qrY = H * 0.42;
+
+      page.drawRectangle({
+        x: qrX - 10, y: qrY - 10, width: qrTotal + 20, height: qrTotal + 20, color: t.white,
+      });
+      drawQrOnPage(page, qrMatrix, qrX, qrY, qrSize, t.featureBg, t.white);
+
+      const lbl = "VIEW THIS PRESENTATION ONLINE";
+      page.drawText(lbl, {
+        x: qrX + qrTotal / 2 - font.widthOfTextAtSize(lbl, ts(t, 8)) / 2,
+        y: qrY - 24, size: ts(t, 8), font, color: mutedCol,
+      });
+    } catch (err) {
+      console.warn("[pdf] QR code generation failed (non-fatal):", err);
+    }
+  }
 }
 
 // ─── Concept: Vastu Compliance slide ──────────────────────────────────────────
@@ -1375,6 +1671,7 @@ async function addVastuSlide(
   doc: PDFDocument,
   project: Project,
   accent: RGB,
+  t: PdfTheme,
   font: PDFFont,
   bold: PDFFont,
   italic: PDFFont
@@ -1384,16 +1681,13 @@ async function addVastuSlide(
   if (!facing || rooms.length === 0) return;
 
   const page = doc.addPage([W, H]);
-  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: C.dark });
-  page.drawRectangle({ x: 0, y: H - 6, width: W, height: 6, color: accent });
+  slideBackground(page, t, accent);
 
-  page.drawText("VASTU ANALYSIS", {
-    x: M, y: H - M - 4, size: 9, font: bold, color: accent,
-  });
-
-  page.drawText("How this plan aligns with Vastu Shastra principles.", {
-    x: M, y: H - M - 22, size: 10, font: italic, color: C.muted,
-  });
+  const bodyTop = slideHeader(page, {
+    kicker: "Vastu Analysis",
+    headline: "Vastu alignment",
+    subhead: "How this plan aligns with Vastu Shastra principles.",
+  }, t, font, bold, italic, accent);
 
   // Vastu rules for room placement
   const vastuRules: { room: string; ideal: string; direction: string; match: (orient: string) => boolean }[] = [
@@ -1456,51 +1750,70 @@ async function addVastuSlide(
 
   if (results.length === 0) return;
 
-  // Vastu score
+  // ── Score ring — right panel ───────────────────────────────────────────
   const passCount = results.filter(r => r.pass).length;
   const score = Math.round((passCount / results.length) * 100);
 
-  // Score display
-  page.drawText(`${score}%`, {
-    x: W - M - 80, y: H - M - 10, size: 36, font: bold, color: accent,
+  const ringX = W - M - 110;
+  const ringY = H * 0.50;
+  const ringR = 92;
+
+  page.drawCircle({ x: ringX, y: ringY, size: ringR, color: t.panel });
+  page.drawCircle({
+    x: ringX, y: ringY, size: ringR,
+    borderColor: accent, borderWidth: 4, opacity: 1,
   });
-  page.drawText("VASTU SCORE", {
-    x: W - M - 80, y: H - M - 48, size: 7, font, color: C.muted,
+
+  const scoreStr = `${score}%`;
+  page.drawText(scoreStr, {
+    x: ringX - bold.widthOfTextAtSize(scoreStr, ts(t, 46)) / 2,
+    y: ringY - 8, size: ts(t, 46), font: bold, color: accent,
+  });
+  const scoreLbl = "VASTU SCORE";
+  page.drawText(scoreLbl, {
+    x: ringX - font.widthOfTextAtSize(scoreLbl, ts(t, 9)) / 2,
+    y: ringY - 34, size: ts(t, 9), font, color: t.muted,
+  });
+  const passLbl = `${passCount} of ${results.length} checks aligned`;
+  page.drawText(passLbl, {
+    x: ringX - font.widthOfTextAtSize(passLbl, ts(t, TYPE.caption)) / 2,
+    y: ringY - ringR - 26, size: ts(t, TYPE.caption), font, color: t.muted,
   });
 
-  // Results list
-  const startY = H - M - 55;
-  const rowH = 36;
+  // ── Results list — left ────────────────────────────────────────────────
+  const listW = W - M * 2 - 250;
+  const shown = results.slice(0, 7);
+  const rowH  = Math.min(46, (bodyTop - M - 30) / Math.max(shown.length, 1));
 
-  results.slice(0, 7).forEach((r, i) => {
-    const y = startY - i * rowH;
+  shown.forEach((r, i) => {
+    const y = bodyTop - i * rowH;
+    const col = r.pass ? PASS : FAIL;
 
-    // Pass/fail indicator
-    const indicator = r.pass ? "OK" : "--";
-    const indicatorColor = r.pass ? rgb(0.2, 0.7, 0.4) : rgb(0.6, 0.4, 0.2);
-    page.drawText(indicator, {
-      x: M, y: y, size: 9, font: bold, color: indicatorColor,
+    // Status pill — a filled dot plus a word, so it survives greyscale
+    // printing and colour-blind readers rather than relying on hue alone.
+    page.drawCircle({ x: M + 6, y: y + 4, size: 5, color: col });
+    page.drawText(r.pass ? "ALIGNED" : "REVIEW", {
+      x: M + 18, y: y, size: ts(t, 9), font: bold, color: col,
     });
 
-    // Room name + ideal direction
-    page.drawText(`${r.rule.toUpperCase()}`, {
-      x: M + 30, y: y, size: 8, font: bold, color: C.light,
-    });
-    page.drawText(`Ideal: ${r.ideal}  |  Actual: ${r.actual}`, {
-      x: M + 30, y: y - 13, size: 7.5, font, color: C.muted,
+    page.drawText(r.rule.toUpperCase(), {
+      x: M + 96, y: y, size: ts(t, TYPE.caption + 1), font: bold, color: t.ink,
     });
 
-    // Note
-    const noteLines = wrapText(r.note, font, 7, W - M * 2 - 40);
-    noteLines.slice(0, 1).forEach((line, li) => {
-      page.drawText(line, {
-        x: M + 30, y: y - 24 - li * 10, size: 7, font: italic, color: C.muted,
+    page.drawText(`Ideal ${r.ideal}  ·  Actual ${r.actual}`, {
+      x: M + 96, y: y - 16, size: ts(t, TYPE.caption), font, color: t.muted,
+    });
+
+    if (i < shown.length - 1) {
+      page.drawLine({
+        start: { x: M, y: y - rowH + 18 }, end: { x: M + listW, y: y - rowH + 18 },
+        thickness: 0.5, color: t.rule,
       });
-    });
+    }
   });
 
-  // Disclaimer
-  page.drawText("Vastu analysis is indicative — based on room orientation data from AI analysis.", {
-    x: M, y: M + FOOTER_H + 8, size: 6, font, color: C.muted,
+  // Sits above the footer band (which the orchestrator draws at y = M - 6).
+  page.drawText("Vastu analysis is indicative, based on room orientation from the AI plan analysis.", {
+    x: M, y: M + 18, size: ts(t, 9), font: italic, color: t.muted,
   });
 }

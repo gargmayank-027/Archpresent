@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
+import { PDF_THEME_META } from "@/lib/pdfThemeMeta";
 import type { Project } from "@/types";
 
 export default function ExportPage() {
@@ -16,11 +17,15 @@ export default function ExportPage() {
   const [exportError, setExportError] = useState<string | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
 
-  // Real-PDF preview — rasterised pages of the actual generated PDF, so this
-  // screen can never drift from what Export PDF Deck actually produces.
+  // Real-PDF preview — the actual generated PDF, rendered client-side with
+  // pdf.js. `pdfBytes` is kept in state so the Download button reuses these
+  // exact bytes instead of re-generating the PDF a second time — preview
+  // and download can never show two different documents.
   const [pageImages,     setPageImages]     = useState<string[] | null>(null);
+  const [pdfBytes,       setPdfBytes]       = useState<ArrayBuffer | null>(null);
   const [previewLoading, setPreviewLoading] = useState(true);
   const [previewError,   setPreviewError]   = useState(false);
+  const [themeSaving,    setThemeSaving]    = useState(false);
 
   // Share link state
   const [shareUrl,     setShareUrl]     = useState<string | null>(null);
@@ -74,23 +79,46 @@ export default function ExportPage() {
       .catch(() => setLoading(false));
   }
 
-  function loadPreview() {
+  async function loadPreview() {
     setPreviewLoading(true);
     setPreviewError(false);
-    fetch(`/api/export/preview?projectId=${id}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.pages && d.pages.length > 0) {
-          setPageImages(d.pages);
-        } else {
-          // Rasterisation unavailable in this environment — fall back to
-          // the JSX preview below rather than showing a blank screen.
-          setPageImages(null);
-          setPreviewError(true);
-        }
-      })
-      .catch(() => { setPageImages(null); setPreviewError(true); })
-      .finally(() => setPreviewLoading(false));
+    try {
+      const res = await fetch(`/api/export/preview?projectId=${id}`, { cache: "no-store" });
+      if (!res.ok) throw new Error("preview fetch failed");
+      const bytes = await res.arrayBuffer();
+      setPdfBytes(bytes);
+
+      // Render every page of the ACTUAL PDF to an image, client-side. This
+      // is the same file the Download button will hand out, so what you see
+      // here is guaranteed byte-identical to what you download — there's no
+      // separate mockup that can drift out of sync.
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        "pdfjs-dist/build/pdf.worker.min.mjs",
+        import.meta.url
+      ).toString();
+
+      const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+      const images: string[] = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const viewport = page.getViewport({ scale: 2 });
+        const canvas = document.createElement("canvas");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) continue;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        images.push(canvas.toDataURL("image/jpeg", 0.85));
+      }
+      setPageImages(images);
+    } catch (err) {
+      console.error("[export] preview render failed", err);
+      setPageImages(null);
+      setPreviewError(true);
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -151,17 +179,24 @@ export default function ExportPage() {
     setExportDone(false);
     setExportError(null);
     try {
-      const res = await fetch("/api/export", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: id }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        setExportError(err.error ?? "Export failed — please try again.");
-        return;
+      // Reuse the exact bytes already rendered in the preview above, so the
+      // download can never be a different PDF than what was just shown. Only
+      // hit the server again if the preview hasn't finished loading yet.
+      let bytes = pdfBytes;
+      if (!bytes) {
+        const res = await fetch("/api/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectId: id }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          setExportError(err.error ?? "Export failed — please try again.");
+          return;
+        }
+        bytes = await res.arrayBuffer();
       }
-      const blob = await res.blob();
+      const blob = new Blob([bytes], { type: "application/pdf" });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement("a");
       const slug = project?.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") ?? "concept";
@@ -274,29 +309,36 @@ export default function ExportPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Theme selector */}
+            {/* Style preset selector — drives the actual PDF (lib/pdfTheme.ts) */}
             <div className="flex items-center gap-1 border border-stone-200 rounded-sm overflow-hidden">
-              {([
-                { value: "classic", label: "Classic" },
-                { value: "dark", label: "Dark" },
-                { value: "minimal", label: "Minimal" },
-                { value: "warm", label: "Warm" },
-              ] as const).map((t) => (
-                <button key={t.value}
+              {PDF_THEME_META.map((th) => (
+                <button key={th.id}
+                  title={th.description}
+                  disabled={themeSaving}
                   onClick={async () => {
-                    await fetch(`/api/projects/${id}`, {
-                      method: "PATCH",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ presentationTheme: t.value }),
-                    });
-                    setProject(p => p ? { ...p, presentationTheme: t.value } : p);
+                    if ((project?.presentationTheme ?? "classic") === th.id) return;
+                    setThemeSaving(true);
+                    try {
+                      await fetch(`/api/projects/${id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ presentationTheme: th.id }),
+                      });
+                      setProject(p => p ? { ...p, presentationTheme: th.id } : p);
+                      // Re-render the preview against the new preset. Without
+                      // this the firm changes the theme and sees nothing move.
+                      setPdfBytes(null);
+                      await loadPreview();
+                    } finally {
+                      setThemeSaving(false);
+                    }
                   }}
-                  className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest transition-colors ${
-                    (project?.presentationTheme ?? "classic") === t.value
+                  className={`px-3 py-1 font-mono text-[9px] uppercase tracking-widest transition-colors disabled:opacity-50 ${
+                    (project?.presentationTheme ?? "classic") === th.id
                       ? "bg-stone-900 text-white"
                       : "text-stone-400 hover:text-stone-700"
                   }`}>
-                  {t.label}
+                  {th.label}
                 </button>
               ))}
             </div>
@@ -398,8 +440,11 @@ export default function ExportPage() {
             )}
           </div>
           {previewError && (
-            <p className="text-xs text-stone-400 -mt-2">
-              Showing an approximate preview — live PDF rendering isn't available in this environment.
+            <p className="text-xs text-red-500 -mt-2">
+              Couldn't render the live preview.{" "}
+              <button type="button" onClick={loadPreview} className="underline underline-offset-2">
+                Retry
+              </button>
             </p>
           )}
 
