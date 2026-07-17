@@ -318,20 +318,33 @@ function applyRoomColors(
   }
 }
 
-// Detect plan boundary — the bounding box of all room centers, padded
+// Detect plan boundary — the bounding box of every room's actual extent
+// (all four corners), padded just enough to cover wall thickness.
+//
+// The previous version used only room CENTERS (a single point per room)
+// padded by a flat 8% of image width. A center-based box is a crude stand-in
+// for the real building footprint: whichever edge has fewer rooms pulling
+// it inward ends up under-constrained, and an 8%-of-image-width pad (~120px
+// on a 1500px plan) is generous enough to push that edge well past the
+// actual walls into the blank margin or title block — which is exactly the
+// bleed visible in the Review tab. Using every room's full box extent
+// tracks the real footprint much more tightly, so a small fixed pad (just
+// covering wall thickness) is enough.
 function detectPlanBounds(
-  rooms: { cx: number; cy: number }[],
+  rooms: { cx: number; cy: number; boxX1?: number; boxY1?: number; boxX2?: number; boxY2?: number }[],
   imgW: number, imgH: number,
-  padding: number = 60
+  padding: number = 16
 ): { x1: number; y1: number; x2: number; y2: number } {
   if (rooms.length === 0) return { x1: 0, y1: 0, x2: imgW, y2: imgH };
 
   let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
   for (const r of rooms) {
-    minX = Math.min(minX, r.cx);
-    minY = Math.min(minY, r.cy);
-    maxX = Math.max(maxX, r.cx);
-    maxY = Math.max(maxY, r.cy);
+    const x1 = r.boxX1 ?? r.cx, y1 = r.boxY1 ?? r.cy;
+    const x2 = r.boxX2 ?? r.cx, y2 = r.boxY2 ?? r.cy;
+    minX = Math.min(minX, x1);
+    minY = Math.min(minY, y1);
+    maxX = Math.max(maxX, x2);
+    maxY = Math.max(maxY, y2);
   }
 
   return {
@@ -377,14 +390,19 @@ export function FloodFillRenderer({ planImageUrl, rooms, plotInfo, accentColor, 
         return {
           cx: Math.round((box.x + box.width / 2) * w),
           cy: Math.round((box.y + box.height / 2) * h),
+          boxX1: Math.round(box.x * w),
+          boxY1: Math.round(box.y * h),
+          boxX2: Math.round((box.x + box.width) * w),
+          boxY2: Math.round((box.y + box.height) * h),
           color: palette[classifyRoom(room.name)],
           name: room.name,
           type: classifyRoom(room.name),
         };
       });
 
-      // Detect plan boundary to exclude title block
-      const planBounds = detectPlanBounds(roomCenters, w, h, Math.round(w * 0.08));
+      // Detect plan boundary to exclude title block — tight padding now that
+      // this tracks each room's real extent rather than just its center.
+      const planBounds = detectPlanBounds(roomCenters, w, h);
 
       // Apply wall-masked Voronoi coloring
       const imageData = ctx.getImageData(0, 0, w, h);
