@@ -1497,14 +1497,57 @@ function drawPlanSnippet(
   const bh = Math.min(Math.max(box.height, 0.01), 1 - by);
 
   // A little context around the room helps the client locate it on the plan;
-  // a tight crop of four walls is hard to place. Kept modest because fitting a
-  // non-square region into a square thumb already reveals extra along the
-  // short axis.
-  const PAD = 0.08;
-  const px = Math.max(0, bx - bw * PAD);
-  const py = Math.max(0, by - bh * PAD);
-  const pw = Math.min(1 - px, bw * (1 + PAD * 2));
-  const ph = Math.min(1 - py, bh * (1 + PAD * 2));
+  // a tight crop of four walls is hard to place.
+  //
+  // The old approach padded each axis independently (8% of that room's own
+  // width, 8% of its own height) and left the resulting window whatever
+  // shape the room was, then relied on "contain" to fit it into the square
+  // thumb. That's fine for a roughly square room, but an elongated one — a
+  // shallow deck, a car park strip, a front lawn running the width of the
+  // plot — stays elongated, so "contain" shrinks the WHOLE window down to
+  // fit its long axis, leaving the highlighted room a barely-visible sliver
+  // in a mostly-empty square.
+  //
+  // Fix: lock the padded window to the thumb's own aspect ratio (usually
+  // square) BEFORE fitting, by extending the shorter axis outward — never
+  // by stretching the plan image. An elongated room now gets a taller crop
+  // window (more of the plan above/below it, at the same scale) rather
+  // than a shrunk one, so the highlight stays a meaningful fraction of the
+  // frame regardless of the room's own proportions.
+  const MARGIN_RATIO = 0.18;
+  const SMALL_ROOM_MARGIN_RATIO = 0.35;
+  const SMALL_ROOM_THRESHOLD = 0.05; // "small" = under 5% of the plan's own extent, normalised
+  const isSmallRoom = Math.min(bw, bh) < SMALL_ROOM_THRESHOLD;
+  const margin = Math.max(bw, bh) * (isSmallRoom ? SMALL_ROOM_MARGIN_RATIO : MARGIN_RATIO);
+
+  let px0 = bx - margin, py0 = by - margin;
+  let px1 = bx + bw + margin, py1 = by + bh + margin;
+
+  const targetAspect = thumb.width / thumb.height;
+  const winW = px1 - px0, winH = py1 - py0;
+  const winAspect = winW / winH;
+  if (winAspect < targetAspect) {
+    const targetW = winH * targetAspect;
+    const extra = (targetW - winW) / 2;
+    px0 -= extra; px1 += extra;
+  } else if (winAspect > targetAspect) {
+    const targetH = winW / targetAspect;
+    const extra = (targetH - winH) / 2;
+    py0 -= extra; py1 += extra;
+  }
+
+  // Clamp by shifting the window first, so the locked aspect ratio survives
+  // hitting a plan edge — only actually shrinks if the plan itself is
+  // smaller than the target window (rare, acceptable edge case).
+  if (px0 < 0) { px1 -= px0; px0 = 0; }
+  if (py0 < 0) { py1 -= py0; py0 = 0; }
+  if (px1 > 1) { const s = px1 - 1; px0 -= s; px1 = 1; }
+  if (py1 > 1) { const s = py1 - 1; py0 -= s; py1 = 1; }
+
+  const px = Math.max(0, px0);
+  const py = Math.max(0, py0);
+  const pw = Math.min(1, px1) - px;
+  const ph = Math.min(1, py1) - py;
 
   // Plans are line drawings on white — give them a plate so they read on the
   // dark feature surface.
