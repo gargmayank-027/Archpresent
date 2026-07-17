@@ -15,6 +15,54 @@ const USE_BLOB = !USE_SUPABASE && !!process.env.BLOB_READ_WRITE_TOKEN;
 const IS_PROD = USE_SUPABASE || USE_BLOB;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// WRITE SERIALISATION
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Every backend here stores a project as one JSON document, so `update()` is a
+// read-modify-write: fetch the whole project, spread the patch over it, write
+// the whole thing back. Blob storage has no conditional/partial write, so two
+// overlapping updates mean the second one's stale read wins and silently
+// discards the first one's fields.
+//
+// That is not theoretical. There are ~16 call sites, and they overlap in
+// practice: /api/share issues a shareToken while /api/projects/[id] PATCHes a
+// theme, and /api/share/[token] fires an unawaited view-count update on every
+// single page view. A lost write there means an architect generates a share
+// link and the client gets "Link not found", or an analysis disappears and the
+// deck renders with no rooms.
+//
+// This chains updates per project id so a read-modify-write can't interleave
+// with another for the same project. It closes the common case — a single
+// architect clicking around, served by one warm Lambda.
+//
+// It does NOT close cross-instance races: two concurrent requests landing on
+// different Lambdas still race, because the lock is per-process. The real fix
+// is moving projects into Postgres so the database does partial updates
+// atomically — already on the roadmap as the JSON-in-storage → Prisma
+// migration. Until then this removes the failure mode people actually hit.
+const writeChains = new Map<string, Promise<unknown>>();
+
+function serializeWrite<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = writeChains.get(key) ?? Promise.resolve();
+  // Run whether or not the previous write succeeded — one failure must not
+  // wedge every later write for this project.
+  const next = prev.then(fn, fn);
+  // Park a swallowed copy so an unhandled rejection here can't crash the
+  // process, while callers still get the real error from `next`.
+  const parked = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  writeChains.set(key, parked);
+  parked.then(() => {
+    // Drop the entry once it's the tail, so this map can't grow without bound
+    // across a long-lived instance.
+    if (writeChains.get(key) === parked) writeChains.delete(key);
+  });
+  return next;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PROJECT STORE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -30,9 +78,11 @@ export const projectStore: ProjectStore = {
     return local_projectGet(id);
   },
   async update(id, patch) {
-    if (USE_SUPABASE) return supa_projectUpdate(id, patch);
-    if (USE_BLOB) return blob_projectUpdate(id, patch);
-    return local_projectUpdate(id, patch);
+    return serializeWrite(id, async () => {
+      if (USE_SUPABASE) return supa_projectUpdate(id, patch);
+      if (USE_BLOB) return blob_projectUpdate(id, patch);
+      return local_projectUpdate(id, patch);
+    });
   },
   async list() {
     if (USE_SUPABASE) return supa_projectList();

@@ -84,6 +84,14 @@ export default function ExportPage() {
     setPreviewLoading(true);
     setPreviewError(null);
     try {
+      // Refetch the project too. This page reads `analysis` for the readiness
+      // gate and slide list, but only loaded it once on mount — so an analysis
+      // that finished afterwards left the page insisting it was still pending.
+      fetch(`/api/projects/${id}`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((d) => { if (d.project) setProject(d.project); })
+        .catch(() => { /* preview is the important part; keep going */ });
+
       const res = await fetch(`/api/export/preview?projectId=${id}`, { cache: "no-store" });
       if (!res.ok) {
         // Distinguish "the server couldn't build the PDF" from "your browser

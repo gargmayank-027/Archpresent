@@ -36,11 +36,23 @@ export async function GET(
     if (project.shareExpiresAt && new Date(project.shareExpiresAt) < new Date())
       return NextResponse.json({ error: "This link has expired" }, { status: 410 });
 
-    // Track view count + last viewed timestamp (non-blocking)
-    projectStore.update(project.id, {
-      shareViewCount: (project.shareViewCount ?? 0) + 1,
-      shareLastViewedAt: new Date().toISOString(),
-    }).catch(() => {});
+    // Track view count + last viewed timestamp.
+    //
+    // Awaited deliberately. This is a read-modify-write over the whole project
+    // document, and it used to be fire-and-forget — so every client opening a
+    // share link raced whatever the architect was doing, and could write back a
+    // stale copy that dropped a freshly-issued shareToken or a just-saved
+    // analysis. lib/store.ts now serialises writes per project id, but that
+    // only helps if we actually wait for our turn.
+    try {
+      await projectStore.update(project.id, {
+        shareViewCount: (project.shareViewCount ?? 0) + 1,
+        shareLastViewedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      // View counting is analytics — never fail the client's page load for it.
+      console.warn("[share] view count update failed (non-fatal):", err);
+    }
 
     console.log(`[share] Serving project: ${project.name} (${project.id.slice(0, 8)}…)`);
 
