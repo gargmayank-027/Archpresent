@@ -94,6 +94,18 @@ export interface Project {
 
   // Plan strengths can be edited too
   editedStrengths?: string[];
+
+  // ─── CAD import (additive — see archpresent-cad-migration-plan.md) ───────
+  // Every field below is optional. Existing image-origin projects simply
+  // never set them, and every existing consumer of `Project` that doesn't
+  // know about these fields keeps compiling and behaving exactly as before.
+  sourceType?: "image" | "cad";     // undefined is treated as "image" (legacy default)
+  cadFileUrl?: string;              // stored original .dxf/.dwg, needed to re-render on theme change
+  cadTheme?: string;                // the PLAN's own theme (modern/luxury/...) — distinct from
+                                     // presentationTheme, which styles the PDF/share deck (see
+                                     // design-system.md §2: these two theming axes must stay decoupled)
+  cadIrUrl?: string;                // stored FloorPlanIR JSON, for audit / future re-render / V2
+  cadWarnings?: { code: string; message: string; severity: "info" | "warning" }[];
 }
 
 export interface RoomSummary {
@@ -269,7 +281,13 @@ export interface RoomDetail extends RoomSummary {
   specialFeatures?: string[];  // "walk-in wardrobe", "attached bath", "double height"
   furnitureHints?: string[];   // furniture visible in plan: "L-sofa", "island counter"
   moodboardWorthy?: boolean;   // true for spaces with interior design potential
-  boundingBox?: RoomBoundingBox; // real plan coordinates, if known — enables accurate crop
+  boundingBox?: RoomBoundingBox; // real plan coordinates — vision-AI-guessed for image-origin
+                                  // projects, EXACT (from CAD geometry) for CAD-origin projects.
+                                  // Same field, same shape, either way — see cad_service/pipeline.py.
+
+  // ─── CAD import (additive) ────────────────────────────────────────────
+  roomType?: string;                    // deterministic room_type key from the CAD classifier
+  classificationConfidence?: number;    // 0-1, from cad_service.room_classifier
 }
 
 // Extend PlanAnalysis to carry room detail

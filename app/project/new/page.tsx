@@ -88,9 +88,20 @@ export default function NewProjectPage() {
     { num: "4", label: "Export",     status: "pending" as const },
   ];
 
+  function isCadFile(f: File): boolean {
+    // DXF has no consistent browser-reported MIME type (often "" or
+    // "application/octet-stream"), so this is extension-based — same
+    // approach the migration plan calls for (§2.1: "file extension check
+    // at the moment of upload").
+    return f.name.toLowerCase().endsWith(".dxf");
+  }
+
   function handleFileSelect(f: File) {
-    const allowed = ["image/png", "image/jpeg", "application/pdf"];
-    if (!allowed.includes(f.type)) { setError("Please upload a PNG, JPEG, or PDF file."); return; }
+    const allowedImageTypes = ["image/png", "image/jpeg", "application/pdf"];
+    if (!allowedImageTypes.includes(f.type) && !isCadFile(f)) {
+      setError("Please upload a PNG, JPEG, PDF, or DXF file.");
+      return;
+    }
     if (f.size > 20 * 1024 * 1024)  { setError("File must be under 20 MB."); return; }
     setError(null);
     setFile(f);
@@ -116,6 +127,41 @@ export default function NewProjectPage() {
 
     setUploading(true);
     setError(null);
+
+    // ── CAD path: post directly to /api/cad/upload and skip everything
+    //    below (PDF rasterization, /api/projects) entirely. This branch
+    //    is fully separate from the image/PDF path — see migration plan §4.
+    if (isCadFile(file)) {
+      try {
+        const fd = new FormData();
+        fd.append("name",       name.trim());
+        fd.append("clientName", clientName.trim());
+        fd.append("firmName",   firmName.trim() || "Architecture Studio");
+        if (presentationType) fd.append("presentationType", presentationType);
+        fd.append("plan", file);
+
+        if (city.trim())        fd.append("city",           city.trim());
+        if (state_.trim())      fd.append("state",          state_.trim());
+        if (country.trim())     fd.append("country",        country.trim());
+        if (familyDetails.trim()) fd.append("familyDetails", familyDetails.trim());
+        if (lifestyle.trim())   fd.append("lifestyle",      lifestyle.trim());
+        if (priorities.trim())  fd.append("priorities",     priorities.trim());
+        if (showVastu)          fd.append("showVastu",      "true");
+        if (facing)           fd.append("facing",           facing);
+        if (propertyType)     fd.append("propertyType",     propertyType);
+        if (floorLocation)    fd.append("floorLocation",    floorLocation);
+
+        const res  = await fetch("/api/cad/upload", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) { setError(data.error ?? "CAD upload failed"); return; }
+        router.push(`/project/${data.project.id}/review`);
+      } catch {
+        setError("Network error — please try again.");
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
 
     try {
       // If the file is a PDF, rasterize it to PNG client-side BEFORE uploading.
@@ -601,13 +647,13 @@ export default function NewProjectPage() {
               onClick={() => !file && fileInputRef.current?.click()}
               role="button" tabIndex={0}
               onKeyDown={(e) => e.key === "Enter" && fileInputRef.current?.click()}>
-              <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.pdf"
+              <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.pdf,.dxf"
                 className="hidden" onChange={onFileChange} />
 
               {file ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-center gap-3">
-                    <FileIcon type={file.type} />
+                    <FileIcon type={file.type} name={file.name} />
                     <div className="text-left">
                       <p className="text-sm font-medium text-stone-800">{file.name}</p>
                       <p className="font-mono text-xs text-stone-400">{(file.size / 1024).toFixed(0)} KB</p>
@@ -635,7 +681,7 @@ export default function NewProjectPage() {
                       Drop your floor plan here, or <span className="underline underline-offset-2">browse</span>
                     </p>
                     <p className="font-mono text-[10px] text-stone-400 uppercase tracking-widest">
-                      PNG · JPEG · PDF · Max 20 MB
+                      PNG · JPEG · PDF · DXF · Max 20 MB
                     </p>
                   </div>
                 </div>
@@ -643,6 +689,7 @@ export default function NewProjectPage() {
             </div>
             <p className="font-mono text-[10px] text-stone-400 mt-2 leading-relaxed">
               PDF plans with multiple floors are supported — you'll be asked which floor to proceed with on the next step.
+              DXF files are parsed exactly as drawn — walls, rooms, and furniture are never moved or redesigned.
             </p>
           </div>
         </div>
@@ -660,7 +707,11 @@ export default function NewProjectPage() {
           <button type="submit" className="btn-primary"
             disabled={uploading || !file || !name || !clientName}>
             {uploading ? (
-              <><span className="spinner" /><span>{file?.type === "application/pdf" ? "Processing PDF…" : "Uploading…"}</span></>
+              <><span className="spinner" /><span>{
+                file?.name.toLowerCase().endsWith(".dxf") ? "Processing CAD file…"
+                  : file?.type === "application/pdf" ? "Processing PDF…"
+                  : "Uploading…"
+              }</span></>
             ) : (
               <><span>Continue to Review</span><span>→</span></>
             )}
@@ -686,8 +737,8 @@ function SectionHeader({ n, label, hint }: { n: string; label: string; hint?: st
   );
 }
 
-function FileIcon({ type }: { type: string }) {
-  const label = type === "application/pdf" ? "PDF" : "IMG";
+function FileIcon({ type, name }: { type: string; name?: string }) {
+  const label = name?.toLowerCase().endsWith(".dxf") ? "CAD" : type === "application/pdf" ? "PDF" : "IMG";
   return (
     <div className="w-10 h-10 border border-stone-200 rounded-sm flex items-center justify-center flex-shrink-0">
       <span className="font-mono text-[10px] text-stone-500 uppercase font-medium">{label}</span>

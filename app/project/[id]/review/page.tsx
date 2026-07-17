@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
 import { FloodFillRenderer } from "@/components/FloodFillRenderer";
 import { NarrativePreview } from "@/components/NarrativePreview";
+import { CadPlanReview } from "@/components/CadPlanReview";
 import type { Project, PlanAnalysis, PlotInfo } from "@/types";
 
 export default function ReviewPage() {
@@ -299,6 +300,20 @@ export default function ReviewPage() {
 
   if (loading || autoRasterizing) return <PageSkeleton />;
   if (!project) return <div className="p-12 text-center text-stone-400">Project not found.</div>;
+
+  // ── CAD-origin projects get a separate, simpler review UI ──────────────
+  // No AI analysis step needed (geometry + classification already come
+  // from the DXF at upload time) and no FloodFillRenderer (nothing to
+  // flood-fill — the plan is already fully rendered). This branch never
+  // touches the image-path JSX below it (migration plan §5.1).
+  if (project.sourceType === "cad") {
+    return (
+      <CadPlanReview
+        project={project}
+        onProjectUpdate={(patch) => setProject((p) => (p ? { ...p, ...patch } : p))}
+      />
+    );
+  }
 
   // Multi-floor PDF upload — ask which floor to proceed with before showing
   // anything else. Everything downstream (analysis, moodboards, export)
