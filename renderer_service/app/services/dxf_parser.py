@@ -17,6 +17,7 @@ oversight (see README.md).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -222,10 +223,65 @@ def insert_transform(e: RawEntity) -> dict:
     }
 
 
+_MTEXT_STACK_RE = re.compile(r"\\S([^;/#^]*)[/#^]([^;]*);")
+_MTEXT_SIMPLE_CODE_RE = re.compile(r"\\[AHWQCT][^;]*;")
+_MTEXT_FONT_CODE_RE = re.compile(r"\\F[^;]*;")
+_MTEXT_TOGGLE_CODE_RE = re.compile(r"\\[LlOoKk]")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def clean_mtext(raw: str) -> str:
+    """
+    Strips AutoCAD MTEXT inline formatting codes down to plain readable
+    text. Real architectural room labels routinely embed these — e.g.
+    `\\A1;TOILET-1 6'-6"X13'-10{\\H0.7x;\\S1/2;}"` is meant to display as
+    `TOILET-1 6'-6"X13'-10 1/2"`. Previously only `\\P` (paragraph break)
+    was handled, so every other code leaked verbatim into room names
+    shown to the architect (and, eventually, their client).
+
+    Handles: \\A (alignment), \\H (height), \\W (width factor), \\Q
+    (oblique angle), \\C (color), \\T (tracking), \\F (font), \\L/\\O/\\K
+    (underline/overline/strikethrough toggles), \\S (stacked fractions —
+    converted to "numerator/denominator" with a leading space so it
+    doesn't fuse onto a preceding number), \\P and \\~ (paragraph break
+    and non-breaking space, both -> a plain space), local-formatting
+    braces `{...}` (dropped, content kept), and escaped literals
+    (`\\\\`, `\\{`, `\\}`).
+    """
+    if not raw:
+        return raw
+    text = raw
+
+    # Protect escaped literals before anything else strips formatting codes.
+    text = text.replace("\\\\", "\x00BACKSLASH\x00")
+    text = text.replace("\\{", "\x00LBRACE\x00")
+    text = text.replace("\\}", "\x00RBRACE\x00")
+
+    # Stacked fractions: \S1/2; -> " 1/2" (also handles # and ^ separators).
+    # Leading space keeps "13'-10" + "1/2" from fusing into "101/2".
+    text = _MTEXT_STACK_RE.sub(lambda m: f" {m.group(1)}/{m.group(2)}", text)
+
+    text = text.replace("\\P", " ").replace("\\~", " ")
+
+    text = _MTEXT_SIMPLE_CODE_RE.sub("", text)
+    text = _MTEXT_FONT_CODE_RE.sub("", text)
+    text = _MTEXT_TOGGLE_CODE_RE.sub("", text)
+
+    # Remaining grouping braces (local formatting scope) — drop the
+    # braces themselves, keep their content.
+    text = text.replace("{", "").replace("}", "")
+
+    text = text.replace("\x00BACKSLASH\x00", "\\")
+    text = text.replace("\x00LBRACE\x00", "{")
+    text = text.replace("\x00RBRACE\x00", "}")
+
+    return _WHITESPACE_RE.sub(" ", text).strip()
+
+
 def text_value(e: RawEntity) -> str:
     # MTEXT stores its content across repeated code-1/3 fragments;
     # TEXT stores it as a single code-1 value.
     if e.dxftype == "MTEXT":
         parts = e.get_all(3) + e.get_all(1)
-        return "".join(parts).replace("\\P", " ").strip()
+        return clean_mtext("".join(parts))
     return (e.get(1) or "").strip()

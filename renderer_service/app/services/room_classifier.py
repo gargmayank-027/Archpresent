@@ -22,7 +22,7 @@ SYNONYMS: dict[RoomType, set[str]] = {
     RoomType.KITCHEN:   {"KITCHEN", "KIT", "PANTRY", "SERVICE"},
     RoomType.DINING:    {"DINING", "DINNING"},
     RoomType.BATHROOM:  {"TOILET", "BATH", "WC", "POWDER", "WASHROOM"},
-    RoomType.DRESSING:  {"DRESS", "WARDROBE", "WIC", "CLOSET"},
+    RoomType.DRESSING:  {"DRESS", "WARDROBE", "WIC", "CLOSET", "W.I.W", "WALK-IN"},
     RoomType.POOJA:     {"POOJA", "PUJA", "PRAYER", "MANDIR"},
     RoomType.OUTDOOR:   {"BALCONY", "TERRACE", "PORCH", "GARDEN", "LAWN", "DECK"},
     RoomType.LOBBY:     {"LOBBY", "FOYER", "ENTRY", "STAIR", "PASSAGE", "LIFT", "CORRIDOR"},

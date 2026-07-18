@@ -32,3 +32,19 @@ def test_none_label_is_unclassified() -> None:
 def test_empty_string_label_is_unclassified() -> None:
     rt, conf = classify_room("")
     assert rt == RoomType.UNCLASSIFIED
+
+
+def test_wiw_abbreviation_classifies_as_dressing() -> None:
+    """Real-world label: "W.I.W-2 8'-1 1/2"X11'-9"" — a walk-in-wardrobe
+    abbreviation that doesn't tokenize as a single word (the dots split
+    it into "W","I","W"), so it only matches via the substring fallback,
+    not the primary token-set check. Confidence is 0.7 (substring match),
+    not 1.0."""
+    rt, conf = classify_room("W.I.W-2 8'-1 1/2\"X11'-9\"")
+    assert rt == RoomType.DRESSING
+    assert conf == 0.7
+
+
+def test_walk_in_classifies_as_dressing() -> None:
+    rt, conf = classify_room("WALK-IN CLOSET")
+    assert rt == RoomType.DRESSING
