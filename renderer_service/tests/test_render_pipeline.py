@@ -60,6 +60,21 @@ def test_svg_is_well_formed_xml(result) -> None:
     assert root.tag.endswith("svg")
 
 
+def test_svg_declares_physical_mm_dimensions_not_bare_pixel_counts(result) -> None:
+    """A bare number on width/height (e.g. width="8800") gets read by
+    rasterizers as a literal pixel count — for a real building-sized
+    plan (tens of thousands of mm) that produced 500+ million declared
+    pixels, blowing past Sharp's default safety limit in production.
+    An explicit "mm" suffix makes this a properly physically-sized
+    vector document instead; the Node side (lib/cadSvgRaster.ts)
+    computes a sane rasterization density from these values."""
+    root = ET.fromstring(result.svg)
+    assert root.attrib["width"].endswith("mm")
+    assert root.attrib["height"].endswith("mm")
+    assert root.attrib["width"][:-2].isdigit()
+    assert root.attrib["height"][:-2].isdigit()
+
+
 def test_room_summaries_are_normalized_0_to_1(result) -> None:
     for room in result.rooms:
         for key in ("x", "y", "width", "height"):

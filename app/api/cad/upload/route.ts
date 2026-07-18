@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { projectStore, saveUploadedFile } from "@/lib/store";
 import { renderCadPlan } from "@/lib/cadClient";
+import { rasterizeCadSvgToPng } from "@/lib/cadSvgRaster";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import type { Project, PlotInfo, PlotFacing, PropertyType, FloorLocation, RoomDetail } from "@/types";
@@ -92,13 +93,15 @@ export async function POST(req: NextRequest) {
     const { url: cadIrUrl } = await saveUploadedFile(Buffer.from(cadResult.irJson), `cad-${id}-ir.json`);
 
     // Master artifact is SVG (architecture doc §6.3); PNG is derived from
-    // it via `sharp`, which is already a project dependency (used by
-    // lib/planRenderer.ts and lib/enhance.ts) — no new dependency added.
+    // it via lib/cadSvgRaster.ts, which targets a controlled output
+    // resolution regardless of the building's real-world physical size
+    // (a plain sharp() call here previously failed on any real
+    // building-sized plan — "Input image exceeds pixel limit" — since
+    // the SVG's physical mm dimensions were being read as literal pixels).
     let planImageUrl: string;
     let planImagePath: string;
     try {
-      const sharp = (await import("sharp")).default;
-      const pngBuffer = await sharp(Buffer.from(cadResult.svg)).png().toBuffer();
+      const pngBuffer = await rasterizeCadSvgToPng(cadResult.svg);
       const saved = await saveUploadedFile(pngBuffer, `cad-${id}-rendered.png`);
       planImageUrl = saved.url;
       planImagePath = saved.diskPath;

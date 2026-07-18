@@ -123,7 +123,16 @@ def render_svg(ir: FloorPlanIR, theme: Theme) -> str:
     )
 
     return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{min_x:.1f} {min_y:.1f} {width:.1f} {height:.1f}"
-     width="{width:.0f}" height="{height:.0f}" style="{css_vars}">
+     width="{width:.0f}mm" height="{height:.0f}mm" style="{css_vars}">
+  <!-- width/height carry an explicit "mm" unit so this is a properly
+       physically-sized vector document, not an implicit pixel count —
+       a bare number here gets read as literal pixels by rasterizers,
+       which for a real building-sized plan (tens of thousands of mm)
+       produces an absurd, often over-limit pixel count. The viewBox
+       below remains the source of truth for the internal mm coordinate
+       system either way; rasterization resolution is controlled
+       explicitly by the caller (see lib/cadSvgRaster.ts), not implied
+       by this attribute. -->
   <defs>
     <filter id="furnitureShadow" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur in="SourceAlpha" stdDeviation="25" />

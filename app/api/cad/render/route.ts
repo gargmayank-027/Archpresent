@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { projectStore, saveUploadedFile } from "@/lib/store";
 import { renderCadPlan } from "@/lib/cadClient";
+import { rasterizeCadSvgToPng } from "@/lib/cadSvgRaster";
 
 export const runtime = "nodejs";
 
@@ -87,8 +88,7 @@ export async function POST(req: NextRequest) {
 
     let renderedPlanUrl: string;
     try {
-      const sharp = (await import("sharp")).default;
-      const pngBuffer = await sharp(Buffer.from(cadResult.svg)).png().toBuffer();
+      const pngBuffer = await rasterizeCadSvgToPng(cadResult.svg);
       const saved = await saveUploadedFile(pngBuffer, `cad-${projectId}-rendered-${Date.now()}.png`);
       renderedPlanUrl = saved.url;
     } catch (err) {
