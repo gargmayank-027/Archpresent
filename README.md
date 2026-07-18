@@ -179,8 +179,9 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 REPLICATE_API_TOKEN=r8_...
 
-# CAD import (see cad_service/README.md)
-CAD_SERVICE_PYTHON_BIN=python3   # optional — override if python3 isn't on PATH
+# CAD import
+RENDERER_URL=http://localhost:8000        # the standalone Python renderer service
+RENDERER_REQUEST_TIMEOUT_MS=30000          # optional — default 30s
 ```
 
 ---
@@ -190,20 +191,22 @@ CAD_SERVICE_PYTHON_BIN=python3   # optional — override if python3 isn't on PAT
 `/project/new` also accepts `.dxf` files alongside PNG/JPEG/PDF. This is a
 second, parallel upload path — the image-upload flow described above is
 completely unaffected by it. See `archpresent-cad-migration-plan.md` for
-the full rationale and `cad_service/README.md` for how the Python renderer
-itself works.
+the frontend integration rationale and `cad-service-fastapi-migration-plan.md`
+for the standalone renderer's architecture.
 
-**Requirements:** `python3` must be on the server's `PATH`. No `pip install`
-is required — the V1 MVP implementation is standard-library-only (see
-`cad_service/README.md` for why, and the production upgrade path to
-`ezdxf`/`pydantic`/`shapely`/`fastapi`).
+**Requirements:** the `renderer_service/` FastAPI app must be running and
+reachable at `RENDERER_URL` — it is a fully separate service/deployment,
+not a subprocess of the Next.js app (see `renderer_service/README.md` for
+how to run it locally or via Docker). `lib/cadClient.ts` talks to it over
+plain HTTP (`fetch`); there is no `child_process`/`python3` dependency
+anywhere in the Next.js app itself.
 
 ```
 app/api/cad/upload/route.ts   — POST: parse a DXF, create a Project
 app/api/cad/render/route.ts   — POST: re-render an existing CAD project under a new theme
 app/api/cad/themes/route.ts   — GET: theme picker metadata
-lib/cadClient.ts              — Node <-> Python bridge (child_process today, HTTP later)
-cad_service/                  — the Python renderer itself (parse -> classify -> map -> render)
+lib/cadClient.ts              — Node -> renderer_service HTTP client (fetch)
+renderer_service/             — the standalone Python renderer (FastAPI; parse -> classify -> map -> theme -> render)
 components/CadThemePicker.tsx — theme picker UI
 components/CadPlanReview.tsx  — CAD-specific review-page UI
 ```
@@ -214,9 +217,16 @@ unchanged, because the CAD pipeline populates exactly the same
 `renderedPlanUrl` / `analysis.rooms[]` contract the image pipeline does,
 just from real geometry instead of an AI guess.
 
-Try it locally:
+Try it locally (two processes — the renderer service, then the Next.js app):
 ```bash
-python3 -m unittest discover cad_service/tests   # Python side, no deps needed
-python3 cad_service/cli.py cad_service/fixtures/sample_apartment.dxf --theme modern --out /tmp/cad_out
+# terminal 1
+cd renderer_service
+source .venv/bin/activate
+python3 -m uvicorn app.main:app --reload --port 8000
+
+# terminal 2
+cd ..   # back to the Next.js app root
+npm run dev
 ```
+
 

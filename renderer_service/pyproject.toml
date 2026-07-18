@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# Lets `pytest` find `app.*` imports without installing the package or
+# manually managing sys.path/PYTHONPATH — pytest inserts this directory
+# automatically per its "rootdir" import resolution (pytest >= 7).
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

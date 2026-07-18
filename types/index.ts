@@ -106,6 +106,12 @@ export interface Project {
                                      // design-system.md §2: these two theming axes must stay decoupled)
   cadIrUrl?: string;                // stored FloorPlanIR JSON, for audit / future re-render / V2
   cadWarnings?: { code: string; message: string; severity: "info" | "warning" }[];
+  cadUnitOverride?: string;         // "mm" | "cm" | "m" | "in" | "ft" — see renderer_service/app/services/units.py.
+                                     // Undefined/omitted means "trust the file's own $INSUNITS header".
+  cadBlockOverrides?: Record<string, string>; // raw CAD block name -> furniture category, accumulated
+                                               // across re-renders so a firm's mapping choices persist.
+  cadUnmappedBlockNames?: string[]; // block names that still fell back to the generic symbol on the
+                                     // most recent render — drives components/CadBlockMappingPanel.tsx.
 }
 
 export interface RoomSummary {
@@ -283,11 +289,11 @@ export interface RoomDetail extends RoomSummary {
   moodboardWorthy?: boolean;   // true for spaces with interior design potential
   boundingBox?: RoomBoundingBox; // real plan coordinates — vision-AI-guessed for image-origin
                                   // projects, EXACT (from CAD geometry) for CAD-origin projects.
-                                  // Same field, same shape, either way — see cad_service/pipeline.py.
+                                  // Same field, same shape, either way — see renderer_service/app/services/render_pipeline.py.
 
   // ─── CAD import (additive) ────────────────────────────────────────────
   roomType?: string;                    // deterministic room_type key from the CAD classifier
-  classificationConfidence?: number;    // 0-1, from cad_service.room_classifier
+  classificationConfidence?: number;    // 0-1, from renderer_service/app/services/room_classifier.py
 }
 
 // Extend PlanAnalysis to carry room detail

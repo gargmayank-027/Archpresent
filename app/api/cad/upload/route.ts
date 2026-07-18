@@ -66,10 +66,15 @@ export async function POST(req: NextRequest) {
 
     const buffer = Buffer.from(await planFile.arrayBuffer());
 
+    const unitOverrideRaw = formData.get("unitOverride");
+    const unitOverride = unitOverrideRaw && String(unitOverrideRaw).trim()
+      ? String(unitOverrideRaw).trim()
+      : undefined;
+
     // ── Run the CAD pipeline ────────────────────────────────────────────
     let cadResult;
     try {
-      cadResult = await renderCadPlan(buffer, planFile.name, "modern");
+      cadResult = await renderCadPlan(buffer, planFile.name, "modern", { unitOverride });
     } catch (err) {
       console.error("[POST /api/cad/upload] CAD pipeline failed:", err);
       return NextResponse.json(
@@ -161,6 +166,8 @@ export async function POST(req: NextRequest) {
       cadIrUrl,
       cadTheme: cadResult.theme,
       cadWarnings: cadResult.warnings,
+      cadUnitOverride: unitOverride,
+      cadUnmappedBlockNames: cadResult.unmappedBlockNames,
     };
 
     await projectStore.create(project);

@@ -77,6 +77,7 @@ export default function NewProjectPage() {
 
   // ── File upload ────────────────────────────────────────────────────────────
   const [file, setFile]         = useState<File | null>(null);
+  const [cadUnitOverride, setCadUnitOverride] = useState<string>(""); // "" = trust the file's own $INSUNITS
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError]         = useState<string | null>(null);
@@ -150,6 +151,7 @@ export default function NewProjectPage() {
         if (facing)           fd.append("facing",           facing);
         if (propertyType)     fd.append("propertyType",     propertyType);
         if (floorLocation)    fd.append("floorLocation",    floorLocation);
+        if (cadUnitOverride)  fd.append("unitOverride",      cadUnitOverride);
 
         const res  = await fetch("/api/cad/upload", { method: "POST", body: fd });
         const data = await res.json();
@@ -667,6 +669,31 @@ export default function NewProjectPage() {
                     }}>
                     Remove file
                   </button>
+
+                  {isCadFile(file) && (
+                    <div className="pt-2 border-t border-stone-100 text-left max-w-xs mx-auto"
+                         onClick={(e) => e.stopPropagation()}>
+                      <label className="font-mono text-[9px] uppercase tracking-widest text-stone-400 block mb-1.5">
+                        Drawing units (optional)
+                      </label>
+                      <select
+                        value={cadUnitOverride}
+                        onChange={(e) => setCadUnitOverride(e.target.value)}
+                        className="w-full text-xs border border-stone-200 rounded-sm px-2 py-1.5 bg-white text-stone-700"
+                      >
+                        <option value="">Auto-detect from file (default)</option>
+                        <option value="mm">Millimeters</option>
+                        <option value="cm">Centimeters</option>
+                        <option value="m">Meters</option>
+                        <option value="in">Inches</option>
+                        <option value="ft">Feet</option>
+                      </select>
+                      <p className="font-mono text-[9px] text-stone-400 mt-1 leading-relaxed">
+                        Only change this if room sizes come out obviously wrong — some files'
+                        internal units don't match what their header declares.
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3">

@@ -1,27 +1,22 @@
 /**
  * lib/cadClient.ts
  *
- * Bridge to the Python CAD renderer (`cad_service/`). V1 MVP invokes it as
- * a local subprocess via `child_process` rather than over HTTP — this is a
- * deliberate interim choice (see cad_service/README.md and
- * archpresent-cad-migration-plan.md Phase 3), not a permanent one:
+ * HTTP bridge to the standalone Python renderer service
+ * (`renderer_service/`, a FastAPI app — see
+ * cad-service-fastapi-migration-plan.md). This is the swap the file's
+ * own previous version always said was coming: the Sprint 1-4
+ * `child_process`/`spawn`/`python3` local-subprocess bridge is gone
+ * entirely, replaced by `fetch()` against `RENDERER_URL`.
  *
- *   Today:  Next.js API route --(child_process)--> cad_service/cli.py
- *   Later:  Next.js API route --(fetch, HTTP)-----> FastAPI service
- *
- * Every function in this file is written so that swap only touches this
- * one file — no caller (the `app/api/cad/*` routes) needs to change when
- * the subprocess bridge is replaced with a real HTTP client, because the
- * return shape (`CadRenderResult`) stays the same either way.
+ * No caller needed to change for this swap — `app/api/cad/upload/route.ts`,
+ * `app/api/cad/render/route.ts`, and `app/api/cad/themes/route.ts` only
+ * ever touched this file's exports (`renderCadPlan`, `CAD_THEMES`,
+ * `CadRenderResult`), never the transport underneath them. That isolation
+ * is what makes this a one-file change.
  */
 
-import { execFile } from "child_process";
-import { promisify } from "util";
-import { mkdtemp, readFile, writeFile, rm } from "fs/promises";
-import { tmpdir } from "os";
-import path from "path";
-
-const execFileAsync = promisify(execFile);
+const RENDERER_URL = process.env.RENDERER_URL || "http://localhost:8000";
+const REQUEST_TIMEOUT_MS = Number(process.env.RENDERER_REQUEST_TIMEOUT_MS) || 30_000;
 
 export interface CadRoomDetail {
   name: string;
@@ -46,6 +41,8 @@ export interface CadRenderResult {
   roomCount: number;
   furnitureCount: number;
   wallCount: number;
+  unmappedBlockNames: string[]; // furniture block names that fell back to the generic
+                                 // symbol — feed back via blockOverrides to fix them.
 }
 
 export interface CadThemeMeta {
@@ -55,97 +52,133 @@ export interface CadThemeMeta {
   available: boolean;
 }
 
-// ── Config ──────────────────────────────────────────────────────────────
-
-function cadServiceRoot(): string {
-  // Repo root — this file lives at <repo>/lib/cadClient.ts, cad_service/
-  // lives at <repo>/cad_service/.
-  return path.resolve(process.cwd());
+export interface RenderCadPlanOptions {
+  unitOverride?: string;                  // "mm" | "cm" | "m" | "in" | "ft"
+  blockOverrides?: Record<string, string>; // raw block name -> furniture category
 }
 
-function python3Bin(): string {
-  return process.env.CAD_SERVICE_PYTHON_BIN || "python3";
+/** Structured error thrown by every function in this file — always has a
+ * `code` matching the renderer service's error envelope (or a
+ * transport-level code for failures that never reached the service), so
+ * callers can distinguish "bad file" from "service unreachable" if they
+ * want to (today's callers just catch-and-surface the message, but the
+ * code is there for when that needs to get more specific). */
+export class CadServiceError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "CadServiceError";
+    this.code = code;
+  }
 }
 
 // ── Core bridge call ───────────────────────────────────────────────────
 
 /**
  * Runs the CAD pipeline against a DXF file's contents and returns the
- * render result. Throws a plain Error with a user-safe message on any
- * failure (bad file, parser crash, missing interpreter) — callers should
- * catch and turn this into a 4xx API response, matching the error-model
- * requirement in the architecture doc §7 (distinguish hard failures from
- * warnings; warnings are returned in `.warnings`, never thrown).
+ * render result. Throws `CadServiceError` on any failure (connection
+ * refused, timeout, non-2xx response, malformed response) — callers
+ * catch and turn this into a 4xx/5xx API response. Warnings from the
+ * pipeline itself are never thrown; they come back in `.warnings`.
  */
 export async function renderCadPlan(
   dxfBuffer: Buffer,
   originalFilename: string,
-  themeKey: string = "modern"
+  themeKey: string = "modern",
+  options: RenderCadPlanOptions = {}
 ): Promise<CadRenderResult> {
-  const workDir = await mkdtemp(path.join(tmpdir(), "archpresent-cad-"));
-  const dxfPath = path.join(workDir, "input.dxf");
-  const outDir = path.join(workDir, "out");
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(dxfBuffer)], { type: "application/octet-stream" }), originalFilename);
+  form.append("theme", themeKey);
+  if (options.unitOverride) {
+    form.append("unit_override", options.unitOverride);
+  }
+  if (options.blockOverrides && Object.keys(options.blockOverrides).length > 0) {
+    form.append("block_overrides", JSON.stringify(options.blockOverrides));
+  }
 
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  let res: Response;
   try {
-    await writeFile(dxfPath, dxfBuffer);
-
-    const cliPath = path.join(cadServiceRoot(), "cad_service", "cli.py");
-    let stdout: string;
-    try {
-      const result = await execFileAsync(
-        python3Bin(),
-        [cliPath, dxfPath, "--theme", themeKey, "--out", outDir],
-        { timeout: 30_000, maxBuffer: 20 * 1024 * 1024 }
+    res = await fetch(`${RENDERER_URL}/api/v1/render`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new CadServiceError(
+        "timeout",
+        `The renderer service did not respond within ${REQUEST_TIMEOUT_MS / 1000}s (${RENDERER_URL}).`
       );
-      stdout = result.stdout;
-    } catch (err: any) {
-      // execFile throws on non-zero exit — the CLI still prints JSON to
-      // stdout in that case (see cad_service/cli.py's error-JSON contract).
-      stdout = err?.stdout ?? "";
-      if (!stdout) {
-        throw new Error(
-          `CAD service did not run (is python3 available? is cad_service/ present?): ${err?.message ?? err}`
-        );
-      }
     }
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(stdout.trim().split("\n").pop()!); // last line, in case anything else prints
-    } catch {
-      throw new Error(`CAD service returned unparseable output: ${stdout.slice(0, 500)}`);
-    }
-
-    if (!parsed.ok) {
-      throw new Error(parsed.error || "CAD service failed for an unknown reason");
-    }
-
-    const [svg, irJson] = await Promise.all([
-      readFile(parsed.svgPath, "utf-8"),
-      readFile(parsed.irPath, "utf-8"),
-    ]);
-
-    return {
-      svg,
-      irJson,
-      rooms: parsed.rooms,
-      warnings: parsed.warnings,
-      theme: parsed.theme,
-      roomCount: parsed.roomCount,
-      furnitureCount: parsed.furnitureCount,
-      wallCount: parsed.wallCount,
-    };
+    throw new CadServiceError(
+      "connection_failed",
+      `Could not reach the renderer service at ${RENDERER_URL}: ${err?.message ?? err}`
+    );
   } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    clearTimeout(timeoutHandle);
+  }
+
+  let body: any;
+  try {
+    body = await res.json();
+  } catch (err) {
+    throw new CadServiceError(
+      "invalid_response",
+      `Renderer service returned a non-JSON response (status ${res.status}).`
+    );
+  }
+
+  if (!res.ok || body?.ok === false) {
+    const code = body?.error?.code ?? `http_${res.status}`;
+    const message = body?.error?.message ?? `Renderer service returned ${res.status} with no error detail.`;
+    throw new CadServiceError(code, message);
+  }
+
+  if (!body?.svg || !body?.ir || !Array.isArray(body?.rooms)) {
+    throw new CadServiceError(
+      "invalid_response",
+      "Renderer service returned 200 but the response was missing expected fields (svg/ir/rooms)."
+    );
+  }
+
+  return {
+    svg: body.svg,
+    irJson: JSON.stringify(body.ir),
+    rooms: body.rooms,
+    warnings: body.warnings ?? [],
+    theme: body.theme,
+    roomCount: body.roomCount,
+    furnitureCount: body.furnitureCount,
+    wallCount: body.wallCount,
+    unmappedBlockNames: body.unmappedBlockNames ?? [],
+  };
+}
+
+// ── Health check (not used by any caller yet — available for a future
+//    startup/diagnostic check without needing another file) ────────────
+
+export async function checkRendererHealth(): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const res = await fetch(`${RENDERER_URL}/api/v1/health`, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return { ok: false, detail: `Renderer health check returned ${res.status}` };
+    const body = await res.json();
+    return { ok: body?.status === "ok", detail: JSON.stringify(body) };
+  } catch (err: any) {
+    return { ok: false, detail: `Renderer unreachable at ${RENDERER_URL}: ${err?.message ?? err}` };
   }
 }
 
 // ── Theme listing ──────────────────────────────────────────────────────
-// Mirrors cad_service/theme.py's list_themes(). Kept as a small static
-// list here (rather than shelling out) since it's pure metadata and the
-// picker UI needs it to render instantly — if the theme list ever needs
-// to be dynamic, swap this for a `python3 -c "..."` call without touching
-// any caller, same as the render bridge above.
+// renderer_service does not yet expose GET /api/v1/themes (Sprint 4
+// scope explicitly excluded it) — this stays a static list, mirroring
+// renderer_service/app/services/theme.py's list_themes() output exactly.
+// Swapping this for a real `fetch(`${RENDERER_URL}/api/v1/themes`)` call
+// is a same-shape, same-file change whenever that endpoint ships — no
+// caller of CAD_THEMES needs to change either way.
 
 export const CAD_THEMES: CadThemeMeta[] = [
   { key: "modern", name: "Modern", description: "Clean lines, light neutral walls, confident muted room tints.", available: true },

@@ -12,19 +12,30 @@
  * No "Analyze" step is needed here (unlike the image path): room geometry
  * and classification already come from the DXF at upload time
  * (app/api/cad/upload/route.ts), so this page's job is purely
- * presentation + theme selection, not AI orchestration.
+ * presentation + correction (theme, drawing units, furniture block
+ * mapping) — not AI orchestration.
  */
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { StepIndicator } from "@/components/StepIndicator";
 import { CadThemePicker } from "@/components/CadThemePicker";
+import { CadBlockMappingPanel } from "@/components/CadBlockMappingPanel";
 import type { Project } from "@/types";
 
 interface Props {
   project: Project;
   onProjectUpdate: (patch: Partial<Project>) => void;
 }
+
+const UNIT_LABELS: Record<string, string> = {
+  "": "Auto-detect from file",
+  mm: "Millimeters",
+  cm: "Centimeters",
+  m: "Meters",
+  in: "Inches",
+  ft: "Feet",
+};
 
 export function CadPlanReview({ project, onProjectUpdate }: Props) {
   const router = useRouter();
@@ -45,15 +56,24 @@ export function CadPlanReview({ project, onProjectUpdate }: Props) {
         { num: "4", label: "Export", status: "pending" as const },
       ];
 
-  async function handleThemeChange(themeKey: string) {
-    if (themeKey === project.cadTheme) return;
+  /** Shared re-render call — theme change, unit correction, and block
+   * mapping all hit the same endpoint; only the changed field differs.
+   * Omitted fields fall back to whatever's already stored on the project
+   * (see app/api/cad/render/route.ts), so e.g. changing the theme never
+   * silently discards a prior unit correction. */
+  async function rerender(patch: { theme?: string; unitOverride?: string; blockOverrides?: Record<string, string> }) {
     setRendering(true);
     setRenderError(null);
     try {
       const res = await fetch("/api/cad/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, theme: themeKey }),
+        body: JSON.stringify({
+          projectId: project.id,
+          theme: patch.theme ?? project.cadTheme ?? "modern",
+          ...(patch.unitOverride !== undefined ? { unitOverride: patch.unitOverride } : {}),
+          ...(patch.blockOverrides ? { blockOverrides: patch.blockOverrides } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Re-render failed");
@@ -62,6 +82,9 @@ export function CadPlanReview({ project, onProjectUpdate }: Props) {
         planImageUrl: data.renderedPlanUrl,
         cadTheme: data.cadTheme,
         cadWarnings: data.warnings,
+        cadUnitOverride: data.cadUnitOverride,
+        cadBlockOverrides: data.cadBlockOverrides,
+        cadUnmappedBlockNames: data.unmappedBlockNames,
         analysis: { ...(project.analysis ?? { rooms: [] }), rooms: data.rooms },
       });
     } catch (err) {
@@ -76,6 +99,7 @@ export function CadPlanReview({ project, onProjectUpdate }: Props) {
   }
 
   const rooms = project.analysis?.rooms ?? [];
+  const unmappedBlockNames = project.cadUnmappedBlockNames ?? [];
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-12">
@@ -124,16 +148,43 @@ export function CadPlanReview({ project, onProjectUpdate }: Props) {
               ))}
             </div>
           )}
+
+          <CadBlockMappingPanel
+            unmappedBlockNames={unmappedBlockNames}
+            existingOverrides={project.cadBlockOverrides ?? {}}
+            applying={rendering}
+            onApply={(overrides) => rerender({ blockOverrides: overrides })}
+          />
         </div>
 
-        {/* ── Right: theme + room list ─────────────────────────────────── */}
+        {/* ── Right: theme + units + room list ─────────────────────────── */}
         <div className="lg:col-span-2 space-y-5 fade-up fade-up-3">
           <div className="card p-4 bg-white">
             <CadThemePicker
               value={project.cadTheme ?? "modern"}
-              onChange={handleThemeChange}
+              onChange={(themeKey) => { if (themeKey !== project.cadTheme) rerender({ theme: themeKey }); }}
               disabled={rendering}
             />
+          </div>
+
+          <div className="card p-4 bg-white">
+            <label className="font-mono text-[10px] tracking-widest text-stone-400 uppercase block mb-2">
+              Drawing units
+            </label>
+            <select
+              value={project.cadUnitOverride ?? ""}
+              disabled={rendering}
+              onChange={(e) => rerender({ unitOverride: e.target.value })}
+              className="w-full text-xs border border-stone-200 rounded-sm px-2 py-1.5 bg-white text-stone-700"
+            >
+              {Object.entries(UNIT_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+            <p className="font-mono text-[9px] text-stone-400 mt-1.5 leading-relaxed">
+              If room sizes look wrong, your file's internal units may not match what its
+              header declares — try a different value here.
+            </p>
           </div>
 
           <div className="card p-4 bg-white">

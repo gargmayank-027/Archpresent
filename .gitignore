@@ -41,3 +41,12 @@ next-env.d.ts
 # via the prebuild/predev npm hooks. Not committed: it is a ~1.3MB build
 # artefact that must stay in lockstep with the installed pdfjs-dist version.
 /public/pdf.worker.min.mjs
+
+# Python (renderer_service)
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+htmlcov/
+.coverage
