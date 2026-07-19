@@ -99,7 +99,9 @@ export interface Project {
   // Every field below is optional. Existing image-origin projects simply
   // never set them, and every existing consumer of `Project` that doesn't
   // know about these fields keeps compiling and behaving exactly as before.
-  sourceType?: "image" | "cad";     // undefined is treated as "image" (legacy default)
+  sourceType?: "image" | "cad" | "pdf_image"; // undefined is treated as "image" (legacy default).
+                                     // "pdf_image" = the vector-PDF engine (see lib/pdfClient.ts) —
+                                     // distinct from "cad" (DXF) and "image" (raster + AI analysis).
   cadFileUrl?: string;              // stored original .dxf/.dwg, needed to re-render on theme change
   cadTheme?: string;                // the PLAN's own theme (modern/luxury/...) — distinct from
                                      // presentationTheme, which styles the PDF/share deck (see
@@ -112,6 +114,23 @@ export interface Project {
                                                // across re-renders so a firm's mapping choices persist.
   cadUnmappedBlockNames?: string[]; // block names that still fell back to the generic symbol on the
                                      // most recent render — drives components/CadBlockMappingPanel.tsx.
+
+  // ─── PDF vector import (additive, mirrors the CAD import fields above
+  //     but for the vector-PDF engine — see renderer_service/app/services/
+  //     ingest_pdf.py and lib/pdfClient.ts). Vector-PDF and DXF projects
+  //     are both sourceType-tagged and never confused with each other:
+  //     each carries only its own field set (cad* vs pdf*). ─────────────
+  pdfFileUrl?: string;              // stored original .pdf, needed to re-render on theme/scale change
+  pdfPage?: number;                 // which page of a multi-page PDF was used (zero-based)
+  pdfTheme?: string;                // the PLAN's own theme — same decoupling from presentationTheme
+                                     // as cadTheme above
+  pdfIrUrl?: string;                // stored FloorPlanIR JSON (same schema as cadIrUrl's)
+  pdfWarnings?: { code: string; message: string; severity: "info" | "warning" }[];
+  pdfScaleOverride?: string;        // drafting scale as "1:N" (e.g. "1:100") — see
+                                     // renderer_service/app/services/pdf_scale.py. Undefined/omitted
+                                     // means the plan was rendered assuming 1:1 (see that module's
+                                     // docstring for why a PDF, unlike DXF, has no header to fall
+                                     // back on) — check pdfWarnings for an "unknown_pdf_scale" entry.
 }
 
 export interface RoomSummary {

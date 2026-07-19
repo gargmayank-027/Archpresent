@@ -11,10 +11,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import health, info, render
+from app.api.v1.endpoints import health, info, render, render_pdf
 
 api_v1_router = APIRouter(prefix="/api/v1")
 
 api_v1_router.include_router(health.router, tags=["health"])
 api_v1_router.include_router(info.router, tags=["info"])
 api_v1_router.include_router(render.router, tags=["render"])
+api_v1_router.include_router(render_pdf.router, tags=["render"])

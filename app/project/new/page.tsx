@@ -78,6 +78,13 @@ export default function NewProjectPage() {
   // ── File upload ────────────────────────────────────────────────────────────
   const [file, setFile]         = useState<File | null>(null);
   const [cadUnitOverride, setCadUnitOverride] = useState<string>(""); // "" = trust the file's own $INSUNITS
+  // Opt-in only (default OFF): a PDF still goes through the existing
+  // rasterize + AI-analysis path unless this is explicitly checked. The
+  // new vector-PDF engine only handles vector-drawn PDFs (not scans), so
+  // this stays an explicit choice rather than the new default — see
+  // lib/pdfClient.ts / renderer_service/app/services/pdf_router.py.
+  const [usePdfVectorEngine, setUsePdfVectorEngine] = useState(false);
+  const [pdfScaleOverride, setPdfScaleOverride]     = useState<string>(""); // "" = assume 1:1, see pdf_scale.py
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError]         = useState<string | null>(null);
@@ -95,6 +102,10 @@ export default function NewProjectPage() {
     // approach the migration plan calls for (§2.1: "file extension check
     // at the moment of upload").
     return f.name.toLowerCase().endsWith(".dxf");
+  }
+
+  function isPdfFile(f: File): boolean {
+    return f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
   }
 
   function handleFileSelect(f: File) {
@@ -156,6 +167,45 @@ export default function NewProjectPage() {
         const res  = await fetch("/api/cad/upload", { method: "POST", body: fd });
         const data = await res.json();
         if (!res.ok) { setError(data.error ?? "CAD upload failed"); return; }
+        router.push(`/project/${data.project.id}/review`);
+      } catch {
+        setError("Network error — please try again.");
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
+    // ── Vector-PDF engine path (opt-in, default OFF): post directly to
+    //    /api/pdf-plan/upload and skip the rasterize + AI-analysis path
+    //    below entirely — mirrors the CAD branch immediately above. Only
+    //    taken if the user explicitly checked "Try vector-quality PDF
+    //    engine" for a selected .pdf file; every other PDF upload keeps
+    //    going through the existing, unchanged rasterize + AI path.
+    if (isPdfFile(file) && usePdfVectorEngine) {
+      try {
+        const fd = new FormData();
+        fd.append("name",       name.trim());
+        fd.append("clientName", clientName.trim());
+        fd.append("firmName",   firmName.trim() || "Architecture Studio");
+        if (presentationType) fd.append("presentationType", presentationType);
+        fd.append("plan", file);
+
+        if (city.trim())        fd.append("city",           city.trim());
+        if (state_.trim())      fd.append("state",          state_.trim());
+        if (country.trim())     fd.append("country",        country.trim());
+        if (familyDetails.trim()) fd.append("familyDetails", familyDetails.trim());
+        if (lifestyle.trim())   fd.append("lifestyle",      lifestyle.trim());
+        if (priorities.trim())  fd.append("priorities",     priorities.trim());
+        if (showVastu)          fd.append("showVastu",      "true");
+        if (facing)           fd.append("facing",           facing);
+        if (propertyType)     fd.append("propertyType",     propertyType);
+        if (floorLocation)    fd.append("floorLocation",    floorLocation);
+        if (pdfScaleOverride) fd.append("scaleOverride",    pdfScaleOverride);
+
+        const res  = await fetch("/api/pdf-plan/upload", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) { setError(data.error ?? "PDF vector-engine upload failed"); return; }
         router.push(`/project/${data.project.id}/review`);
       } catch {
         setError("Network error — please try again.");
@@ -692,6 +742,46 @@ export default function NewProjectPage() {
                         Only change this if room sizes come out obviously wrong — some files'
                         internal units don't match what their header declares.
                       </p>
+                    </div>
+                  )}
+
+                  {isPdfFile(file) && (
+                    <div className="pt-2 border-t border-stone-100 text-left max-w-xs mx-auto"
+                         onClick={(e) => e.stopPropagation()}>
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={usePdfVectorEngine}
+                          onChange={(e) => setUsePdfVectorEngine(e.target.checked)}
+                          className="mt-0.5"
+                        />
+                        <span className="font-mono text-[9px] uppercase tracking-widest text-stone-400">
+                          Try vector-quality PDF engine (Beta)
+                        </span>
+                      </label>
+                      <p className="font-mono text-[9px] text-stone-400 mt-1 leading-relaxed">
+                        For PDFs exported directly from AutoCAD/Revit/SketchUp (not scans) — parses
+                        real wall geometry instead of relying on AI to interpret a rasterized image.
+                        Scanned plans should leave this unchecked.
+                      </p>
+                      {usePdfVectorEngine && (
+                        <div className="mt-2">
+                          <label className="font-mono text-[9px] uppercase tracking-widest text-stone-400 block mb-1.5">
+                            Drafting scale (optional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 1:100"
+                            value={pdfScaleOverride}
+                            onChange={(e) => setPdfScaleOverride(e.target.value)}
+                            className="w-full text-xs border border-stone-200 rounded-sm px-2 py-1.5 bg-white text-stone-700"
+                          />
+                          <p className="font-mono text-[9px] text-stone-400 mt-1 leading-relaxed">
+                            PDFs carry no scale header — without this, room sizes assume 1:1, which
+                            is almost always wrong. Match your title block's printed scale.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -9,6 +9,14 @@ app/api/v1/endpoints/render.py calls. Ported from cad_service/pipeline.py
 future V2 enhancement pipeline — and an unqualified `pipeline.py` would
 stop being an obvious name at that point. Everything it does is
 unchanged.).
+
+`RoomSummary` and the IR->RoomSummary adapter now live in
+`room_summary.py` (extracted so `pdf_render_pipeline.py` can reuse them
+without duplicating the normalization math — the same "one shared
+module instead of duplicated private functions" pattern already used
+for `app/utils/geometry.py`). Both names are re-exported here
+unchanged, so no existing import site (`from app.services.render_pipeline
+import RoomSummary`, `result.rooms`, etc.) needs to change.
 """
 
 from __future__ import annotations
@@ -20,22 +28,10 @@ from app.services.dxf_parser import parse_dxf, DxfParseError
 from app.services.ingest import build_ir
 from app.services.theme import resolve_theme, Theme
 from app.services.svg_renderer import render_svg, MARGIN_MM
+from app.services.room_summary import RoomSummary, room_summaries as _room_summaries
 from app.models.floorplan import FloorPlanIR
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RoomSummary:
-    """A room, adapted to the shape the API response (and, eventually,
-    the ArchPresent Next.js app's RoomDetail contract) expects: normalized
-    0-1 bounding box coordinates relative to the rendered plan's overall
-    bounds, rather than raw millimetre coordinates."""
-    name: str
-    size_estimate_sqm: float | None
-    bounding_box: dict[str, float]
-    room_type: str
-    classification_confidence: float
 
 
 @dataclass
@@ -45,33 +41,6 @@ class PipelineResult:
     rooms: list[RoomSummary]
     theme_key: str
     warnings: list[dict]
-
-
-def _room_summaries(ir: FloorPlanIR) -> list[RoomSummary]:
-    min_x, min_y, max_x, max_y = ir.bounds()
-    # Match the SVG's own margin so normalized boxes line up with what's
-    # actually drawn (see svg_renderer.MARGIN_MM).
-    min_x -= MARGIN_MM
-    min_y -= MARGIN_MM
-    total_w = ((max_x - min_x) + MARGIN_MM) or 1.0
-    total_h = ((max_y - min_y) + MARGIN_MM) or 1.0
-
-    summaries: list[RoomSummary] = []
-    for room in ir.rooms:
-        rb_min_x, rb_min_y, rb_max_x, rb_max_y = room.boundary.bounds()
-        summaries.append(RoomSummary(
-            name=room.label_text or room.room_type.value.replace("_", " ").title(),
-            size_estimate_sqm=round(room.area_sqm, 1) if room.area_sqm else None,
-            bounding_box={
-                "x": (rb_min_x - min_x) / total_w,
-                "y": (rb_min_y - min_y) / total_h,
-                "width": (rb_max_x - rb_min_x) / total_w,
-                "height": (rb_max_y - rb_min_y) / total_h,
-            },
-            room_type=room.room_type.value,
-            classification_confidence=room.classification_confidence,
-        ))
-    return summaries
 
 
 def run(dxf_text: str, original_filename: str, theme_key: str = "modern",
