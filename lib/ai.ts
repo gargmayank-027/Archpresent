@@ -252,6 +252,10 @@ async function analyzeWithGroq(
     max_tokens: 4096,
     temperature: 0.2,
     response_format: { type: "json_object" },
+    reasoning_effort: "none", // qwen3.6-27b defaults to thinking mode on Groq, which emits
+    // <think>...</think> reasoning tokens before the JSON — that preamble was consuming the
+    // response and/or breaking JSON-mode validation (json_validate_failed, empty
+    // failed_generation). Disabling thinking mode for this structured-extraction call fixes it.
   });
 
   const res = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
