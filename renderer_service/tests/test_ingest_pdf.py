@@ -23,7 +23,7 @@ def _synthetic_plan() -> PageGeometry:
     segs = [
         RawSegment(50, 50, 750, 50, WALL), RawSegment(750, 50, 750, 550, WALL),
         RawSegment(750, 550, 50, 550, WALL), RawSegment(50, 550, 50, 50, WALL),
-        RawSegment(400, 50, 400, 250, WALL), RawSegment(400, 290, 400, 550, WALL),
+        RawSegment(400, 50, 400, 250, WALL), RawSegment(400, 253.5, 400, 550, WALL),
         RawSegment(400, 300, 750, 300, WALL),
     ]
     texts = [

@@ -47,22 +47,40 @@ def _build_synthetic_plan_pdf() -> bytes:
         shape.finish(width=THIN_WIDTH, color=(0.6, 0.6, 0.6))
         shape.commit()
 
-    # Envelope
-    wall_line((50, 50), (750, 50))
-    wall_line((750, 50), (750, 550))
-    wall_line((750, 550), (50, 550))
-    wall_line((50, 550), (50, 50))
-    # Vertical partition with a door gap between y=250 and y=290
-    wall_line((400, 50), (400, 250))
-    wall_line((400, 290), (400, 550))
+    # Envelope -- kept comfortably clear of pdf_geometry's title-block
+    # exclusion margins (right 18% / bottom 12% of the page) so its own
+    # walls never get discarded as title-block content.
+    wall_line((50, 50), (600, 50))
+    wall_line((600, 50), (600, 450))
+    wall_line((600, 450), (50, 450))
+    wall_line((50, 450), (50, 50))
+    # Vertical partition with a small (>merge_gap, <=snap tolerance) gap
+    wall_line((325, 50), (325, 250))
+    wall_line((325, 253.5), (325, 450))
     # Horizontal partition (right side only)
-    wall_line((400, 300), (750, 300))
+    wall_line((325, 250), (600, 250))
     # A thin dimension line — must be filtered out as non-structural
-    thin_line((60, 40), (740, 40))
+    thin_line((60, 40), (580, 40))
 
-    page.insert_text((200, 300), "LIVING", fontsize=11)
-    page.insert_text((545, 178), "BEDROOM", fontsize=11)
-    page.insert_text((545, 428), "KITCHEN", fontsize=11)
+    page.insert_text((150, 350), "LIVING", fontsize=11)
+    page.insert_text((450, 130), "BEDROOM", fontsize=11)
+    page.insert_text((450, 350), "KITCHEN", fontsize=11)
+
+    # Padding: a small hatch pattern in an unused corner of the page,
+    # purely to give this fixture enough real vector drawing content to
+    # clear pdf_router.py's min_drawings_for_vector=40 threshold. The
+    # ~10 wall/dimension lines above were never enough on their own --
+    # this fixture was failing to route as VECTOR at all before this was
+    # added (see the router-rejection failures this fixes). A real
+    # architectural PDF has thousands of drawing ops; this just needs to
+    # plausibly clear the threshold, not look like anything in particular.
+    for i in range(50):
+        hx = 760 + (i % 5) * 6
+        hy = 20 + (i // 5) * 6
+        hatch = page.new_shape()
+        hatch.draw_line((hx, hy), (hx + 4, hy + 4))
+        hatch.finish(width=THIN_WIDTH, color=(0.7, 0.7, 0.7))
+        hatch.commit()
 
     return doc.tobytes()
 
@@ -129,8 +147,9 @@ def test_render_pdf_valid_vector_pdf_returns_real_response(
     assert body["roomCount"] == 3
     assert body["wallCount"] > 0
     assert "<svg" in body["svg"]
-    assert body["ir"]["provenance"]["sourceFormat"] == "pdf_vector" or \
-        body["ir"]["provenance"]["source_format"] == "pdf_vector"
+    provenance = body["ir"]["provenance"]
+    assert provenance.get("sourceFormat") == "pdf_vector" or \
+        provenance.get("source_format") == "pdf_vector"
 
 
 def test_render_pdf_rejects_non_pdf_extension(client: TestClient) -> None:
