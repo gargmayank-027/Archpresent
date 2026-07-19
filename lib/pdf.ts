@@ -87,6 +87,41 @@ export interface DeckBuild {
   pageLabels: string[];
 }
 
+/**
+ * WinAnsi (the encoding pdf-lib's StandardFonts use) can't represent many
+ * Unicode punctuation marks that sneak in from copy-pasted text or
+ * AI-generated copy — non-breaking hyphens (U+2011), en/em dashes, curly
+ * quotes, ellipses, bullets. pdf-lib throws at draw time rather than
+ * silently dropping them ("WinAnsi cannot encode ..."), so every string
+ * that reaches a StandardFonts-based font in this file is normalized to
+ * its closest WinAnsi-safe equivalent first.
+ */
+function sanitizeForPdf(input: string): string {
+  return input
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, "-")   // hyphens/dashes -> "-"
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")                  // curly single quotes -> "'"
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')                  // curly double quotes -> '"'
+    .replace(/\u2026/g, "...")                                       // ellipsis
+    .replace(/[\u2022\u25CF\u25E6]/g, "-")                         // bullets -> "-"
+    .replace(/[^\x00-\xFF]/g, "?");                                 // anything else outside WinAnsi/Latin-1
+}
+
+/**
+ * Wraps a pdf-lib PDFFont so every text-measuring/encoding call it makes is
+ * sanitized first. This covers BOTH direct font.widthOfTextAtSize(...)
+ * calls used throughout this file for manual layout AND
+ * page.drawText(text, { font }) calls, since drawText re-derives width and
+ * glyph encoding from the same font object — one wrap point covers every
+ * call site in this file.
+ */
+function sanitizingFont(font: PDFFont): PDFFont {
+  const origWidth  = font.widthOfTextAtSize.bind(font);
+  const origEncode = font.encodeText.bind(font);
+  font.widthOfTextAtSize = (text: string, size: number) => origWidth(sanitizeForPdf(text), size);
+  font.encodeText = (text: string) => origEncode(sanitizeForPdf(text));
+  return font;
+}
+
 export async function buildProjectPdf(project: Project): Promise<DeckBuild> {
   const firm   = await firmStore.get();
   const accent = ACCENT_COLORS[firm?.accentColor ?? "graphite"];
@@ -100,9 +135,9 @@ export async function buildProjectPdf(project: Project): Promise<DeckBuild> {
   // the order can never disagree with the document.
   const labels = new Map<PDFPage, string>();
   const doc    = await PDFDocument.create();
-  const reg    = await doc.embedFont(StandardFonts.Helvetica);
-  const bold   = await doc.embedFont(StandardFonts.HelveticaBold);
-  const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
+  const reg    = sanitizingFont(await doc.embedFont(StandardFonts.Helvetica));
+  const bold   = sanitizingFont(await doc.embedFont(StandardFonts.HelveticaBold));
+  const italic = sanitizingFont(await doc.embedFont(StandardFonts.HelveticaOblique));
 
   // Embed logo
   let logoBytes: Uint8Array | null = null;
