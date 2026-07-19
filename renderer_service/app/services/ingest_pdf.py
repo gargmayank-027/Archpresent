@@ -65,6 +65,26 @@ _VECTOR_LAYER = "pdf-vector"
 _NO_HANDLE = ""
 _NO_BLOCK = ""
 
+# The gap wall_graph.derive_room_polygons() will bridge (e.g. a wall's two
+# parallel face-lines drawn a couple of points apart, or minor drafting
+# imprecision at a T-junction) is a FIXED, scale-independent property of
+# how the drawing was actually drafted at the page level — it does NOT
+# get bigger or smaller just because a different scale_override is
+# guessed. Expressing the tolerance directly in millimetres (as a single
+# fixed post-scale constant) breaks this: the SAME raw-page gap ends up
+# wildly over- or under-bridged depending purely on which scale happened
+# to be entered (a 1:10 guess made a 50mm tolerance too generous and
+# fragmented the plan into ~90 sliver "rooms"; a 1:100 guess made the
+# same 50mm too tight to bridge real gaps at all, fragmenting the wall
+# graph badly enough to time out). Expressing it in raw PDF POINTS
+# instead, then scaling by the same `factor` used everywhere else, keeps
+# the bridged gap consistent in the drawing's own terms regardless of
+# which scale is guessed — topology (room count/shapes) becomes
+# scale-invariant; only the resulting real-world size still depends on
+# getting the actual scale right, which no tolerance choice can fix.
+# Starting value, not yet tuned against a properly-scaled real file.
+_SNAP_TOLERANCE_PT = 4.0
+
 # wall_graph.derive_room_polygons() is existing DXF-engine code (see its
 # own module docstring) with O(n^2)-or-worse steps that were only ever
 # validated against "hundreds" of walls / one real messy file. A real,
@@ -194,7 +214,7 @@ def _extract_labels(geom: PageGeometry, factor: float, warnings: list[ParseWarni
 
 def _build_rooms(walls: list[Wall], labels: list[TextLabel],
                   overall_bounds: tuple[float, float, float, float],
-                  warnings: list[ParseWarning]) -> list[Room]:
+                  warnings: list[ParseWarning], factor: float) -> list[Room]:
     """Two-tier room detection (see module docstring for why PDF has no
     tier-1 equivalent to ingest.py's explicit-boundary-polyline tier):
       1. Wall-graph derivation from the recovered wall centerlines —
@@ -212,7 +232,7 @@ def _build_rooms(walls: list[Wall], labels: list[TextLabel],
                 wall_segments.append((pts[i], pts[i + 1]))
 
         try:
-            future = _room_detection_executor.submit(derive_room_polygons, wall_segments, 50.0)
+            future = _room_detection_executor.submit(derive_room_polygons, wall_segments, _SNAP_TOLERANCE_PT * factor)
             derived = future.result(timeout=_ROOM_DETECTION_TIMEOUT_SECONDS)
         except FutureTimeoutError:
             logger.warning(
@@ -324,7 +344,7 @@ def build_ir_from_geometry(
             severity="warning",
         ))
 
-    rooms = _build_rooms(walls, labels, overall_bounds, warnings)
+    rooms = _build_rooms(walls, labels, overall_bounds, warnings, factor)
 
     ir = FloorPlanIR(
         plan_id=new_id("plan", 1),
