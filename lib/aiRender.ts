@@ -63,6 +63,24 @@ export async function generateAiRenderedPlan(
 
   const errors: string[] = [];
 
+  // Gemini 2.5 Flash Image ("Nano Banana") — PRIMARY provider. Reuses the
+  // GOOGLE_AI_KEY already configured for the analysis path (lib/ai.ts);
+  // no separate billing account needed, unlike the Replicate fallback
+  // below (which was failing with 402 Insufficient credit / 404 dead
+  // models — that's what "hits the limit instantly" actually was). We
+  // pass the real plan image as inline_data so the model EDITS the actual
+  // plan rather than inventing an unrelated one from a text prompt alone.
+  if (process.env.GOOGLE_AI_KEY) {
+    try {
+      console.log("[aiRender] Trying Gemini 2.5 Flash Image…");
+      return await renderWithGemini(planBuffer, prompt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Gemini: ${msg}`);
+      console.warn("[aiRender] Gemini failed:", msg);
+    }
+  }
+
   // HF is DNS-blocked from Vercel — skip entirely in production
   if (process.env.HF_API_TOKEN && !process.env.VERCEL) {
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -293,4 +311,69 @@ async function pollReplicate(id: string, token: string): Promise<string> {
   }
 
   throw new Error("Replicate timed out");
+}
+
+
+// ── Gemini 2.5 Flash Image (primary) ────────────────────────────────────
+// REST generateContent with responseModalities:["Text","Image"]; the input
+// plan is passed as inline_data so the model edits the real plan. Response
+// image comes back as base64 in candidates[0].content.parts[].inlineData.
+// API shape verified against Google AI docs (ai.google.dev), Aug 2025+.
+
+async function renderWithGemini(planBuffer: Buffer, prompt: string): Promise<string> {
+  const key = process.env.GOOGLE_AI_KEY!;
+  const model = "gemini-2.5-flash-image";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+
+  // Nano-banana-style editing prompt: keep the real layout, restyle it into
+  // a photorealistic furnished render. Reuses the descriptive prompt built
+  // by buildPrompt(), prefixed with an explicit "edit, don't reinvent"
+  // instruction to keep the model anchored to the uploaded plan.
+  const editPrompt =
+    "Transform this architectural floor plan into a photorealistic, top-down, " +
+    "furnished interior render. Preserve the EXACT wall layout, room positions, " +
+    "and proportions of the provided plan — do not move walls or invent a " +
+    "different layout. " + prompt;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 90000);
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "x-goog-api-key": key,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: editPrompt },
+            { inline_data: { mime_type: "image/png", data: planBuffer.toString("base64") } },
+          ],
+        }],
+        generationConfig: { responseModalities: ["Text", "Image"] },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      throw new Error(`Gemini ${response.status}: ${errText.slice(0, 200)}`);
+    }
+
+    const json = await response.json();
+    const parts = json?.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      // REST returns camelCase inlineData; SDKs sometimes snake_case — accept both.
+      const inline = part.inlineData ?? part.inline_data;
+      if (inline?.data) {
+        const mime = inline.mimeType ?? inline.mime_type ?? "image/png";
+        return `data:${mime};base64,${inline.data}`;
+      }
+    }
+    throw new Error("Gemini returned no image part (only text or empty response)");
+  } finally {
+    clearTimeout(timeout);
+  }
 }
