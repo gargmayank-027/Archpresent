@@ -322,7 +322,34 @@ async function pollReplicate(id: string, token: string): Promise<string> {
 
 async function renderWithGemini(planBuffer: Buffer, prompt: string): Promise<string> {
   const key = process.env.GOOGLE_AI_KEY!;
-  const model = "gemini-2.5-flash-image";
+  // Try newest -> oldest. Different model generations can have separate
+  // quota pools, so if one returns 429 (quota) or 404 (not available on
+  // this account), we fall through to the next rather than giving up.
+  // IDs verified against ai.google.dev/gemini-api/docs (2026):
+  //   Nano Banana 2      -> gemini-3.1-flash-image-preview
+  //   Nano Banana 2 Lite -> gemini-3.1-flash-lite-image
+  //   Nano Banana        -> gemini-2.5-flash-image-preview
+  const models = [
+    "gemini-3.1-flash-image-preview",
+    "gemini-3.1-flash-lite-image",
+    "gemini-2.5-flash-image-preview",
+  ];
+  const geminiErrors: string[] = [];
+  for (const model of models) {
+    try {
+      return await callGeminiImage(model, key, planBuffer, prompt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      geminiErrors.push(`${model}: ${msg}`);
+      console.warn(`[aiRender] Gemini model ${model} failed:`, msg);
+    }
+  }
+  throw new Error(geminiErrors.join(" | "));
+}
+
+async function callGeminiImage(
+  model: string, key: string, planBuffer: Buffer, prompt: string
+): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   // Nano-banana-style editing prompt: keep the real layout, restyle it into
