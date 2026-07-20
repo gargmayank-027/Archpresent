@@ -106,7 +106,7 @@ function classifyRoom(name: string): RoomType {
 
 const BLOCK = 2;       // sampling grid — matches original block-processing resolution
 const WALL_DARK = 90;  // pixels darker than this are walls
-const ALPHA = 0.32;    // tint strength
+const ALPHA = 0.45;    // tint strength (raised from 0.32 for bolder, more presentation-ready room fills; kept below ~0.5 so wall/furniture linework stays readable through the tint)
 const NEAR_WALL_PX = 3;
 
 interface RoomCenter { cx: number; cy: number; color: { r: number; g: number; b: number }; name: string }
