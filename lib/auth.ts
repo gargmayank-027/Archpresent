@@ -15,7 +15,7 @@
 
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { findUserByEmail, verifyPassword } from "@/lib/userStore";
+import { findUserByEmail, verifyPassword, createUser } from "@/lib/userStore";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -31,7 +31,18 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) return null;
 
         const user = await findUserByEmail(credentials.email);
-        if (!user) return null;
+
+        // Unknown email -> auto-register a new account with this password
+        // (per product decision: unknown emails self-register rather than
+        // being rejected). NOTE the tradeoff: an existing user who typos
+        // their email will silently create a NEW empty account instead of
+        // getting a "wrong password" error. That's inherent to implicit
+        // signup, not a bug -- revisit if it causes support issues.
+        if (!user) {
+          const derivedName = credentials.email.split("@")[0] || "New User";
+          const created = await createUser(derivedName, credentials.email, credentials.password);
+          return { id: created.id, name: created.name, email: created.email };
+        }
 
         const valid = await verifyPassword(user, credentials.password);
         if (!valid) return null;

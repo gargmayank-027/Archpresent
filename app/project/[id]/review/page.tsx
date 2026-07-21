@@ -298,6 +298,44 @@ export default function ReviewPage() {
     }
   }
 
+  // #5: spin off a NEW interior project from this concept one, leaving the
+  // concept project intact. Persists the current review edits first (same
+  // as saveAndContinue), then duplicates with presentationType overridden
+  // to "interior" and routes into the interior flow's first step
+  // (moodboards). Reuses the existing /api/projects/duplicate endpoint,
+  // which already copies analysis+plan and clears moodboard/share/render
+  // state — only the type override is new.
+  async function continueToInterior() {
+    setSaving(true);
+    try {
+      // Save current strengths/analysis edits so the copy includes them.
+      await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: id, strengths, analysis }),
+      });
+      const res = await fetch("/api/projects/duplicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: id,
+          presentationType: "interior",
+          name: project?.name ? `${project.name} (Interior)` : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.project?.id) {
+        setError(data.error ?? "Couldn't create the interior presentation.");
+        return;
+      }
+      router.push(`/project/${data.project.id}/moodboards`);
+    } catch {
+      setError("Couldn't create the interior presentation — please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading || autoRasterizing) return <PageSkeleton />;
   if (!project) return <div className="p-12 text-center text-stone-400">Project not found.</div>;
 
@@ -615,6 +653,18 @@ export default function ReviewPage() {
                   <><span>{isConcept ? "Save & Continue to Export" : "Save & Continue to Moodboards"}</span><span>→</span></>
                 )}
               </button>
+
+              {/* #5: from a concept project, spin off a NEW interior
+                  presentation (keeps this concept project intact). */}
+              {isConcept && (
+                <button
+                  onClick={continueToInterior}
+                  disabled={saving || strengths.length === 0}
+                  className="btn-secondary w-full justify-center mt-2"
+                >
+                  <span>Continue to Interior Presentation</span><span>→</span>
+                </button>
+              )}
             </>
           )}
         </div>
